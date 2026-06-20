@@ -62,7 +62,7 @@ import { cn } from '@/lib/utils';
 import Layout from '@/components/Layout';
 import StatusBadge from '@/components/StatusBadge';
 import ProgressTimeline from '@/components/ProgressTimeline';
-import SelectionSlip from '@/components/SelectionSlip';
+import SelectionSlip, { printSelectionSlip } from '@/components/SelectionSlip';
 
 function getStatusBadgeClass(status: OrderStatus) {
   const map: Record<OrderStatus, string> = {
@@ -436,7 +436,7 @@ export default function OrderDetail() {
         <div className="flex gap-2">
           {order.status === 'selected' || currentStatusIndex >= 0 ? (
             <button
-              onClick={() => window.print()}
+              onClick={() => printSelectionSlip(order)}
               className="btn-secondary flex items-center gap-2"
               title="打印选片确认单"
             >
@@ -646,7 +646,7 @@ export default function OrderDetail() {
             </div>
           </div>
 
-          {(currentStatusIndex >= 3 || order.status === 'selected') && (
+          {['selected', 'retouching', 'layouting', 'producing', 'shipping', 'completed'].includes(order.status) && (
             <div className="card-gold p-5">
               <div className="flex items-center gap-2.5 mb-4">
                 <UserCheck className="w-4.5 h-4.5 text-champagne-500" />
@@ -849,15 +849,30 @@ export default function OrderDetail() {
                           {item.note && (
                             <div className="text-xs text-ink-warm mt-0.5">{item.note}</div>
                           )}
+                          {!item.storedFilename && (
+                            <div className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3" />
+                              文件缺失
+                            </div>
+                          )}
                         </div>
-                        <a
-                          href={`/api/uploads/${encodeURIComponent(item.storedFilename)}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="p-1.5 rounded-lg text-champagne-700 hover:bg-champagne-100 transition"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
+                        {item.storedFilename ? (
+                          <a
+                            href={`/api/uploads/${encodeURIComponent(item.storedFilename)}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="p-1.5 rounded-lg text-champagne-700 hover:bg-champagne-100 transition"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        ) : (
+                          <span
+                            title="文件缺失"
+                            className="p-1.5 rounded-lg text-ink-warm/40 opacity-50"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </span>
+                        )}
                         <button
                           onClick={() => handleDeleteDeliveryItem(item.id)}
                           className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition"

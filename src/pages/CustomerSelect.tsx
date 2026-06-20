@@ -26,7 +26,7 @@ import {
 import { api } from '@/api/client';
 import type { Order, Photo, PhotoMark } from '@shared/types';
 import { PHOTO_MARK_LABELS } from '@shared/types';
-import SelectionSlip from '@/components/SelectionSlip';
+import SelectionSlip, { printSelectionSlip } from '@/components/SelectionSlip';
 
 type SelectionMap = Record<string, { mark: PhotoMark; remark: string }>;
 
@@ -220,7 +220,11 @@ export default function CustomerSelect() {
                 </div>
               </div>
               <button
-                onClick={() => window.print()}
+                onClick={() => printSelectionSlip(order, order.photos.map((p) => ({
+                  ...p,
+                  mark: (selection[p.id]?.mark ?? p.mark ?? 'none') as PhotoMark,
+                  remark: selection[p.id]?.remark ?? p.remark ?? null,
+                })))}
                 className="btn-secondary flex items-center gap-2 text-sm py-2"
               >
                 <Printer className="w-4 h-4" />

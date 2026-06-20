@@ -94,16 +94,51 @@ function mapStatusLog(row: any): StatusLog {
 }
 
 function mapDeliveryItem(row: any): DeliveryItem {
+  const VALID_TYPES: DeliveryItemType[] = ['final_package', 'album_photo', 'receipt'];
+  const rawType = String(row.type || '').trim();
+  let type: DeliveryItemType;
+  if (VALID_TYPES.includes(rawType as DeliveryItemType)) {
+    type = rawType as DeliveryItemType;
+  } else if (rawType === 'receipt_proof') {
+    type = 'receipt';
+  } else {
+    type = 'final_package';
+  }
+  const storedFilename = String(row.url || '').trim();
+  const filename = String(row.filename || '未命名文件').trim() || '未命名文件';
+  const hasFile = storedFilename.length > 0;
+  const url = hasFile
+    ? (filename.startsWith('http') ? filename : `/api/uploads/${storedFilename}`)
+    : '';
   return {
     id: row.id,
     orderId: row.order_id,
-    type: row.type as DeliveryItemType,
-    filename: row.filename,
-    storedFilename: row.url,
-    url: row.filename.startsWith('http') ? row.filename : `/api/uploads/${row.url}`,
-    uploadedBy: row.uploaded_by,
+    type,
+    filename,
+    storedFilename,
+    url,
+    uploadedBy: String(row.uploaded_by || '系统'),
     uploadedAt: row.uploaded_at,
     note: row.note || undefined,
+  };
+}
+
+function buildOrderFromRow(row: any): Order {
+  const photos = photoRepo.getByOrderId(row.id);
+  const logs = statusLogRepo.getByOrderId(row.id);
+  const activities = activityLogRepo.getByOrderId(row.id);
+  const assignments = stageAssignmentRepo.getByOrderId(row.id);
+  const delStatus = deliveryRepo.getStatus(row.id);
+  const delItems = deliveryRepo.getItemsByOrderId(row.id);
+  const sendLogs = linkSendLogRepo.getByOrderId(row.id);
+  const order = mapOrder(row, photos, logs, activities, assignments, {
+    ...delStatus,
+    items: delItems,
+  });
+  return {
+    ...order,
+    linkSendCount: sendLogs.length,
+    lastLinkSentAt: sendLogs.length > 0 ? sendLogs[0].sentAt : undefined,
   };
 }
 
@@ -302,7 +337,9 @@ export const stageAssignmentRepo = {
          JOIN orders o ON o.id = sa.order_id
          WHERE sa.completed_at IS NULL
            AND sa.assignee IS NOT NULL
+           AND sa.assignee != ''
            AND o.status IN ('retouching', 'layouting', 'producing')
+           AND sa.stage = o.status
          ORDER BY COALESCE(sa.due_date, '9999') ASC`
       )
       .all() as any[];
@@ -461,17 +498,7 @@ export const orderRepo = {
     }
     sql += ' ORDER BY o.created_at DESC';
     const rows = db.prepare(sql).all(...params);
-    return rows.map((row: any) => {
-      const photos = photoRepo.getByOrderId(row.id);
-      const logs = statusLogRepo.getByOrderId(row.id);
-      const assignments = stageAssignmentRepo.getByOrderId(row.id);
-      const delStatus = deliveryRepo.getStatus(row.id);
-      const delItems = deliveryRepo.getItemsByOrderId(row.id);
-      return mapOrder(row, photos, logs, [], assignments, {
-        ...delStatus,
-        items: delItems,
-      });
-    });
+    return rows.map((row: any) => buildOrderFromRow(row));
   },
 
   getById(id: string): Order | null {
@@ -483,22 +510,7 @@ export const orderRepo = {
       )
       .get(id) as any;
     if (!row) return null;
-    const photos = photoRepo.getByOrderId(row.id);
-    const logs = statusLogRepo.getByOrderId(row.id);
-    const activities = activityLogRepo.getByOrderId(row.id);
-    const assignments = stageAssignmentRepo.getByOrderId(row.id);
-    const delStatus = deliveryRepo.getStatus(row.id);
-    const delItems = deliveryRepo.getItemsByOrderId(row.id);
-    const order = mapOrder(row, photos, logs, activities, assignments, {
-      ...delStatus,
-      items: delItems,
-    });
-    const sendLogs = linkSendLogRepo.getByOrderId(row.id);
-    return {
-      ...order,
-      linkSendCount: sendLogs.length,
-      lastLinkSentAt: sendLogs.length > 0 ? sendLogs[0].sentAt : undefined,
-    };
+    return buildOrderFromRow(row);
   },
 
   getByToken(token: string): Order | null {
@@ -510,14 +522,7 @@ export const orderRepo = {
       )
       .get(token) as any;
     if (!row) return null;
-    const photos = photoRepo.getByOrderId(row.id);
-    const logs = statusLogRepo.getByOrderId(row.id);
-    const delStatus = deliveryRepo.getStatus(row.id);
-    const delItems = deliveryRepo.getItemsByOrderId(row.id);
-    return mapOrder(row, photos, logs, [], undefined, {
-      ...delStatus,
-      items: delItems,
-    });
+    return buildOrderFromRow(row);
   },
 
   create(data: {

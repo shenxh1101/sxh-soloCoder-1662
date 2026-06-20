@@ -13,6 +13,7 @@ import {
   FileUp,
   ImagePlus,
   ExternalLink,
+  AlertTriangle,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/client';
@@ -183,39 +184,74 @@ function OrderResultCard({ order }: { order: Order }) {
             <span className="text-sm font-medium text-ink-charcoal">交付资料</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-            {order.delivery.items.map((item) => (
-              <a
-                key={item.id}
-                href={`/api/uploads/${encodeURIComponent(item.storedFilename)}`}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-champagne-100 hover:border-champagne-300 transition-all group"
-              >
-                <div
-                  className={cn(
-                    'w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0',
-                    item.type === 'final_package'
-                      ? 'bg-gradient-to-br from-indigo-400 to-indigo-600'
-                      : item.type === 'album_photo'
-                      ? 'bg-gradient-to-br from-rose-400 to-rose-600'
-                      : 'bg-gradient-to-br from-emerald-400 to-emerald-600'
-                  )}
+            {order.delivery.items.map((item) =>
+              item.storedFilename ? (
+                <a
+                  key={item.id}
+                  href={`/api/uploads/${encodeURIComponent(item.storedFilename)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-champagne-100 hover:border-champagne-300 transition-all group"
                 >
-                  {item.type === 'final_package' ? (
-                    <FileUp className="w-3.5 h-3.5" />
-                  ) : item.type === 'album_photo' ? (
-                    <ImagePlus className="w-3.5 h-3.5" />
-                  ) : (
-                    <Receipt className="w-3.5 h-3.5" />
-                  )}
+                  <div
+                    className={cn(
+                      'w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0',
+                      item.type === 'final_package'
+                        ? 'bg-gradient-to-br from-indigo-400 to-indigo-600'
+                        : item.type === 'album_photo'
+                        ? 'bg-gradient-to-br from-rose-400 to-rose-600'
+                        : 'bg-gradient-to-br from-emerald-400 to-emerald-600'
+                    )}
+                  >
+                    {item.type === 'final_package' ? (
+                      <FileUp className="w-3.5 h-3.5" />
+                    ) : item.type === 'album_photo' ? (
+                      <ImagePlus className="w-3.5 h-3.5" />
+                    ) : (
+                      <Receipt className="w-3.5 h-3.5" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] text-ink-warm">{DELIVERY_ITEM_TYPE_LABELS[item.type]}</div>
+                    <div className="text-xs text-ink-charcoal truncate">{item.filename}</div>
+                  </div>
+                  <ExternalLink className="w-3.5 h-3.5 text-ink-warm/50 group-hover:text-champagne-500 transition-colors shrink-0" />
+                </a>
+              ) : (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-amber-200 opacity-80"
+                  title="文件缺失"
+                >
+                  <div
+                    className={cn(
+                      'w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0',
+                      item.type === 'final_package'
+                        ? 'bg-gradient-to-br from-indigo-400 to-indigo-600'
+                        : item.type === 'album_photo'
+                        ? 'bg-gradient-to-br from-rose-400 to-rose-600'
+                        : 'bg-gradient-to-br from-emerald-400 to-emerald-600'
+                    )}
+                  >
+                    {item.type === 'final_package' ? (
+                      <FileUp className="w-3.5 h-3.5" />
+                    ) : item.type === 'album_photo' ? (
+                      <ImagePlus className="w-3.5 h-3.5" />
+                    ) : (
+                      <Receipt className="w-3.5 h-3.5" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] text-ink-warm">{DELIVERY_ITEM_TYPE_LABELS[item.type]}</div>
+                    <div className="text-xs text-ink-charcoal truncate">{item.filename}</div>
+                    <div className="text-[10px] text-amber-600 flex items-center gap-0.5 mt-0.5">
+                      <AlertTriangle className="w-2.5 h-2.5" />
+                      文件缺失
+                    </div>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[11px] text-ink-warm">{DELIVERY_ITEM_TYPE_LABELS[item.type]}</div>
-                  <div className="text-xs text-ink-charcoal truncate">{item.filename}</div>
-                </div>
-                <ExternalLink className="w-3.5 h-3.5 text-ink-warm/50 group-hover:text-champagne-500 transition-colors shrink-0" />
-              </a>
-            ))}
+              )
+            )}
           </div>
           {order.delivery.signedAt && (
             <div className="mt-3 text-xs text-ink-warm space-y-0.5 pt-3 border-t border-dashed border-champagne-100">
