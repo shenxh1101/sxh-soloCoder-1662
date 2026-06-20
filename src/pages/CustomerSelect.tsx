@@ -14,6 +14,11 @@ import {
   BookHeart,
   X,
   AlertCircle,
+  Album,
+  Wand2,
+  Ban,
+  MessageSquare,
+  Tag,
 } from 'lucide-react';
 import { api } from '@/api/client';
 import type { Order, Photo, PhotoMark } from '@shared/types';
@@ -165,17 +170,71 @@ export default function CustomerSelect() {
       </div>
 
       {submitted && (
-        <div className="max-w-7xl mx-auto px-6 pt-6">
-          <div className="card-gold p-5 bg-gradient-to-r from-champagne-50 to-rose-pale/30 border-champagne-200">
-            <div className="flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-6 pb-2">
+          <div className="card-gold p-6">
+            <div className="flex items-center gap-3 mb-5">
               <CheckCircle2 className="w-6 h-6 text-champagne-600" />
               <div>
-                <h3 className="font-semibold text-ink-charcoal">选片已确认提交</h3>
-                <p className="text-sm text-ink-warm mt-0.5">
-                  您的选片结果已发送至工作室，我们将尽快开始精修制作。您可随时返回此页面查看制作进度。
-                </p>
+                <h3 className="font-display text-lg font-semibold text-ink-charcoal">选片已确认提交</h3>
+                <p className="text-sm text-ink-warm">您的选片结果已发送至工作室，我们将尽快开始精修制作</p>
               </div>
             </div>
+            <div className="gold-divider mb-5" />
+            <div className="grid grid-cols-3 gap-4 mb-5">
+              <div className="p-4 rounded-xl bg-gradient-to-br from-champagne-50 to-champagne-100/50 text-center">
+                <div className="flex items-center justify-center gap-1.5 mb-1">
+                  <Album className="w-4 h-4 text-champagne-600" />
+                  <span className="text-xs text-champagne-700">入册</span>
+                </div>
+                <div className="font-display text-2xl font-semibold text-champagne-700">{stats.album}</div>
+              </div>
+              <div className="p-4 rounded-xl bg-gradient-to-br from-rose-50 to-rose-100/50 text-center">
+                <div className="flex items-center justify-center gap-1.5 mb-1">
+                  <Wand2 className="w-4 h-4 text-rose-500" />
+                  <span className="text-xs text-rose-600">精修</span>
+                </div>
+                <div className="font-display text-2xl font-semibold text-rose-600">{stats.retouch}</div>
+              </div>
+              <div className="p-4 rounded-xl bg-gradient-to-br from-gray-50 to-gray-100/50 text-center">
+                <div className="flex items-center justify-center gap-1.5 mb-1">
+                  <Ban className="w-4 h-4 text-gray-500" />
+                  <span className="text-xs text-gray-600">不选</span>
+                </div>
+                <div className="font-display text-2xl font-semibold text-gray-600">{stats.none}</div>
+              </div>
+            </div>
+            {(() => {
+              const remarkPhotos = order.photos.filter((p) => {
+                const sel = selections[p.id];
+                return sel?.remark;
+              });
+              if (remarkPhotos.length === 0) return null;
+              return (
+                <>
+                  <div className="gold-divider mb-4" />
+                  <div className="flex items-center gap-2 mb-3">
+                    <MessageSquare className="w-4 h-4 text-champagne-500" />
+                    <span className="text-sm font-medium text-ink-charcoal">修图备注汇总</span>
+                  </div>
+                  <div className="space-y-2 max-h-48 overflow-auto pr-2">
+                    {remarkPhotos.map((p) => {
+                      const sel = selections[p.id];
+                      return (
+                        <div key={p.id} className="p-3 rounded-lg bg-cream/50">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Tag className="w-3.5 h-3.5 text-champagne-500" />
+                            <span className="text-xs font-medium text-ink-charcoal">
+                              {p.mark === 'album' ? '入册' : p.mark === 'retouch' ? '精修' : '不选'}
+                            </span>
+                          </div>
+                          <p className="text-sm text-ink-warm pl-5.5">{sel?.remark}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}

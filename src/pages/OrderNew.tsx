@@ -12,8 +12,12 @@ import {
   X,
   FileImage,
   ChevronDown,
+  ChevronRight,
   Check,
   Loader2,
+  Link2,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
 import { api } from '@/api/client';
 import type { Order, Photographer } from '@shared/types';
@@ -50,7 +54,8 @@ export default function OrderNew() {
   const [submitting, setSubmitting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>({});
-
+  const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
+  const [copied, setCopied] = useState(false);
   useEffect(() => {
     api.getPhotographers().then(setPhotographers).catch(() => {});
   }, []);
@@ -106,9 +111,13 @@ export default function OrderNew() {
         await api.uploadPhotos(order.id, files, (done, total) => {
           setUploadProgress(Math.round((done / total) * 100));
         });
+        const refreshed = await api.getOrder(order.id);
+        setCreatedOrder(refreshed);
+      } else {
+        setCreatedOrder(order);
       }
 
-      navigate(`/orders/${order.id}`);
+      setUploading(false);
     } catch (err) {
       alert(err instanceof Error ? err.message : '创建订单失败');
       setSubmitting(false);
@@ -117,6 +126,94 @@ export default function OrderNew() {
   };
 
   const selectedPhotographer = photographers.find((p) => p.id === formData.photographerId);
+
+  const selectionLink = createdOrder
+    ? `${window.location.origin}${window.location.pathname}#/select/${createdOrder.selectionToken}`
+    : '';
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(selectionLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = selectionLink;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  if (createdOrder) {
+    return (
+      <Layout>
+        <div className="max-w-2xl mx-auto">
+          <div className="card-gold p-8 text-center">
+            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-500 flex items-center justify-center text-white mx-auto mb-5">
+              <Check className="w-8 h-8" />
+            </div>
+            <h2 className="font-display text-2xl font-semibold text-ink-charcoal mb-2">订单创建成功</h2>
+            <p className="text-ink-warm mb-1">
+              订单号 <span className="font-mono text-ink-charcoal font-semibold">{createdOrder.orderNo}</span>
+            </p>
+            <p className="text-sm text-ink-warm mb-6">
+              客户：{createdOrder.customer.name} · 套餐：{createdOrder.packageInfo.name}
+            </p>
+
+            <div className="gold-divider mb-6" />
+
+            <div className="text-left mb-6">
+              <div className="flex items-center gap-2 mb-3">
+                <Link2 className="w-4 h-4 text-champagne-500" />
+                <h3 className="font-display text-lg font-semibold text-ink-charcoal">客户选片链接</h3>
+              </div>
+              <div className="p-3 rounded-lg bg-ivory/80 border border-champagne-100 mb-3">
+                <p className="text-sm text-ink-charcoal break-all font-mono leading-relaxed">{selectionLink}</p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCopyLink}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-sm font-medium transition-all',
+                    copied
+                      ? 'bg-green-50 text-green-700 border border-green-200'
+                      : 'btn-primary'
+                  )}
+                >
+                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                  {copied ? '已复制' : '复制链接'}
+                </button>
+                <a
+                  href={`#/select/${createdOrder.selectionToken}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-sm font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-all"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  预览选片页
+                </a>
+              </div>
+              <p className="text-xs text-ink-warm mt-2">将此链接发送给客户，客户可在浏览器中完成在线选片</p>
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => navigate('/orders')} className="btn-secondary flex-1">
+                返回列表
+              </button>
+              <button onClick={() => navigate(`/orders/${createdOrder.id}`)} className="btn-primary flex-1 flex items-center justify-center gap-2">
+                查看订单详情
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>

@@ -25,6 +25,7 @@ export function initDatabase() {
         shipping_company TEXT,
         shipping_tracking_no TEXT,
         satisfaction INTEGER,
+        selection_link_sent INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (photographer_id) REFERENCES photographers(id)
@@ -46,6 +47,7 @@ export function initDatabase() {
         status TEXT NOT NULL,
         timestamp TEXT NOT NULL,
         operator TEXT,
+        remark TEXT,
         FOREIGN KEY (order_id) REFERENCES orders(id)
     );
 

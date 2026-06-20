@@ -21,6 +21,12 @@ import {
   Album,
   Wand2,
   Ban,
+  Link2,
+  Copy,
+  ExternalLink,
+  Send,
+  Check,
+  Pencil,
 } from 'lucide-react';
 import { api } from '@/api/client';
 import {
@@ -90,9 +96,19 @@ export default function OrderDetail() {
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
-  const [showShippingModal, setShowShippingModal] = useState(false);
+  const [showAdvanceModal, setShowAdvanceModal] = useState(false);
+  const [advanceRemark, setAdvanceRemark] = useState('');
   const [shippingCompany, setShippingCompany] = useState('');
   const [shippingTrackingNo, setShippingTrackingNo] = useState('');
+  const [satisfaction, setSatisfaction] = useState(5);
+  const [copied, setCopied] = useState(false);
+  const [linkSentUpdating, setLinkSentUpdating] = useState(false);
+
+  const refreshOrder = async () => {
+    if (!id) return;
+    const data = await api.getOrder(id);
+    setOrder(data);
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -102,42 +118,74 @@ export default function OrderDetail() {
     }).catch(() => setLoading(false));
   }, [id]);
 
-  const handleAdvanceStatus = async () => {
+  const selectionLink = order ? `${window.location.origin}${window.location.pathname}#/select/${order.selectionToken}` : '';
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(selectionLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = selectionLink;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleMarkLinkSent = async () => {
+    if (!order) return;
+    setLinkSentUpdating(true);
+    try {
+      const updated = await api.markSelectionLinkSent(order.id, !order.selectionLinkSent);
+      setOrder(updated);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '操作失败');
+    } finally {
+      setLinkSentUpdating(false);
+    }
+  };
+
+  const handleOpenAdvanceModal = () => {
+    if (!order) return;
+    const nextStatus = NEXT_STATUS[order.status];
+    if (!nextStatus) return;
+    setAdvanceRemark('');
+    setShippingCompany('');
+    setShippingTrackingNo('');
+    setSatisfaction(5);
+    setShowAdvanceModal(true);
+  };
+
+  const handleConfirmAdvance = async () => {
     if (!order) return;
     const nextStatus = NEXT_STATUS[order.status];
     if (!nextStatus) return;
 
-    if (nextStatus === 'shipping') {
-      setShowShippingModal(true);
-      return;
-    }
-
-    setUpdating(true);
-    try {
-      const updated = await api.updateOrderStatus(order.id, { status: nextStatus });
-      setOrder(updated);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : '更新失败');
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const handleConfirmShipping = async () => {
-    if (!order || !shippingCompany.trim() || !shippingTrackingNo.trim()) {
+    if (nextStatus === 'shipping' && (!shippingCompany.trim() || !shippingTrackingNo.trim())) {
       alert('请填写快递公司和单号');
       return;
     }
+
     setUpdating(true);
     try {
-      const updated = await api.updateOrderStatus(order.id, {
-        status: 'shipping',
-        shipping: { company: shippingCompany.trim(), trackingNo: shippingTrackingNo.trim() },
-      });
+      const payload: any = {
+        status: nextStatus,
+        remark: advanceRemark.trim() || undefined,
+      };
+      if (nextStatus === 'shipping') {
+        payload.shipping = { company: shippingCompany.trim(), trackingNo: shippingTrackingNo.trim() };
+      }
+      if (nextStatus === 'completed') {
+        payload.satisfaction = satisfaction;
+      }
+      const updated = await api.updateOrderStatus(order.id, payload);
       setOrder(updated);
-      setShowShippingModal(false);
-      setShippingCompany('');
-      setShippingTrackingNo('');
+      setShowAdvanceModal(false);
     } catch (err) {
       alert(err instanceof Error ? err.message : '更新失败');
     } finally {
@@ -175,6 +223,7 @@ export default function OrderDetail() {
   const remarks = order.photos.filter((p) => p.remark);
 
   const currentStatusIndex = PRODUCTION_STATUSES.indexOf(order.status);
+  const nextStatus = NEXT_STATUS[order.status];
 
   return (
     <Layout>
@@ -194,13 +243,9 @@ export default function OrderDetail() {
           </div>
           <p className="text-sm text-ink-warm mt-0.5">订单号：{order.orderNo}</p>
         </div>
-        {NEXT_STATUS[order.status] && (
-          <button onClick={handleAdvanceStatus} className="btn-primary flex items-center gap-2" disabled={updating}>
-            {updating ? (
-              <Loader2 className="w-4.5 h-4.5 animate-spin" />
-            ) : (
-              <ChevronRight className="w-4.5 h-4.5" />
-            )}
+        {nextStatus && (
+          <button onClick={handleOpenAdvanceModal} className="btn-primary flex items-center gap-2" disabled={updating}>
+            <ChevronRight className="w-4.5 h-4.5" />
             进入下一阶段
           </button>
         )}
@@ -281,6 +326,56 @@ export default function OrderDetail() {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div className="card-gold p-5">
+            <div className="flex items-center gap-2.5 mb-4">
+              <Link2 className="w-4.5 h-4.5 text-champagne-500" />
+              <h3 className="font-display text-lg font-semibold text-ink-charcoal">选片链接</h3>
+              {order.selectionLinkSent && (
+                <span className="badge bg-green-50 text-green-700 border-0 text-xs ml-auto">已发送</span>
+              )}
+            </div>
+            <div className="gold-divider mb-4" />
+            <div className="p-3 rounded-lg bg-ivory/80 border border-champagne-100 mb-4">
+              <p className="text-sm text-ink-charcoal break-all font-mono leading-relaxed">{selectionLink}</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleCopyLink}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all',
+                  copied
+                    ? 'bg-green-50 text-green-700 border border-green-200'
+                    : 'bg-champagne-50 text-champagne-700 border border-champagne-200 hover:bg-champagne-100'
+                )}
+              >
+                {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                {copied ? '已复制' : '复制链接'}
+              </button>
+              <a
+                href={`#/select/${order.selectionToken}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-all"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                预览
+              </a>
+              <button
+                onClick={handleMarkLinkSent}
+                disabled={linkSentUpdating}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all',
+                  order.selectionLinkSent
+                    ? 'bg-green-50 text-green-700 border border-green-200'
+                    : 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
+                )}
+              >
+                {order.selectionLinkSent ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Send className="w-3.5 h-3.5" />}
+                {order.selectionLinkSent ? '已发送' : '标记已发'}
+              </button>
             </div>
           </div>
 
@@ -376,6 +471,12 @@ export default function OrderDetail() {
                           <div className="mt-1 text-xs text-ink-warm">
                             {new Date(log.timestamp).toLocaleString('zh-CN')}
                             {log.operator && <span className="ml-2">· {log.operator}</span>}
+                          </div>
+                        )}
+                        {log?.remark && (
+                          <div className="mt-1.5 text-xs text-ink-charcoal bg-cream/70 px-2.5 py-1.5 rounded-lg inline-flex items-center gap-1.5">
+                            <Pencil className="w-3 h-3 text-champagne-500" />
+                            {log.remark}
                           </div>
                         )}
                       </div>
@@ -500,57 +601,100 @@ export default function OrderDetail() {
         </div>
       </div>
 
-      {showShippingModal && (
+      {showAdvanceModal && nextStatus && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="card-gold w-full max-w-md p-6">
             <div className="flex items-center gap-2.5 mb-5">
-              <Truck className="w-5 h-5 text-champagne-500" />
-              <h3 className="font-display text-xl font-semibold text-ink-charcoal">填写物流信息</h3>
+              {nextStatus === 'shipping' ? (
+                <Truck className="w-5 h-5 text-champagne-500" />
+              ) : nextStatus === 'completed' ? (
+                <CheckCircle2 className="w-5 h-5 text-champagne-500" />
+              ) : (
+                <ChevronRight className="w-5 h-5 text-champagne-500" />
+              )}
+              <h3 className="font-display text-xl font-semibold text-ink-charcoal">
+                进入「{ORDER_STATUS_LABELS[nextStatus]}」阶段
+              </h3>
             </div>
             <div className="gold-divider mb-5" />
 
             <div className="space-y-4">
+              {nextStatus === 'shipping' && (
+                <>
+                  <div>
+                    <label className="input-label">快递公司</label>
+                    <input
+                      type="text"
+                      value={shippingCompany}
+                      onChange={(e) => setShippingCompany(e.target.value)}
+                      placeholder="如：顺丰速运、京东物流等"
+                      className="input-field"
+                    />
+                  </div>
+                  <div>
+                    <label className="input-label">物流单号</label>
+                    <input
+                      type="text"
+                      value={shippingTrackingNo}
+                      onChange={(e) => setShippingTrackingNo(e.target.value)}
+                      placeholder="请输入物流单号"
+                      className="input-field"
+                    />
+                  </div>
+                </>
+              )}
+
+              {nextStatus === 'completed' && (
+                <div>
+                  <label className="input-label">客户满意度评分</label>
+                  <div className="flex items-center gap-2 mt-2">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setSatisfaction(n)}
+                        className="p-0.5 transition-transform hover:scale-110"
+                      >
+                        <Star
+                          className={cn(
+                            'w-8 h-8 transition-colors',
+                            n <= satisfaction ? 'text-champagne-500 fill-champagne-500' : 'text-champagne-200'
+                          )}
+                        />
+                      </button>
+                    ))}
+                    <span className="ml-2 font-display text-xl font-semibold text-champagne-700">{satisfaction}.0</span>
+                  </div>
+                </div>
+              )}
+
               <div>
-                <label className="input-label">快递公司</label>
-                <input
-                  type="text"
-                  value={shippingCompany}
-                  onChange={(e) => setShippingCompany(e.target.value)}
-                  placeholder="如：顺丰速运、京东物流等"
-                  className="input-field"
-                />
-              </div>
-              <div>
-                <label className="input-label">物流单号</label>
-                <input
-                  type="text"
-                  value={shippingTrackingNo}
-                  onChange={(e) => setShippingTrackingNo(e.target.value)}
-                  placeholder="请输入物流单号"
-                  className="input-field"
+                <label className="input-label">阶段备注（选填）</label>
+                <textarea
+                  value={advanceRemark}
+                  onChange={(e) => setAdvanceRemark(e.target.value)}
+                  placeholder="如：精修重点调整肤色、排版确认初稿、客户要求加急等"
+                  rows={3}
+                  className="input-field resize-none"
                 />
               </div>
             </div>
 
             <div className="flex justify-end gap-3 mt-6">
               <button
-                onClick={() => {
-                  setShowShippingModal(false);
-                  setShippingCompany('');
-                  setShippingTrackingNo('');
-                }}
+                onClick={() => setShowAdvanceModal(false)}
                 className="btn-secondary"
                 disabled={updating}
               >
                 取消
               </button>
-              <button onClick={handleConfirmShipping} className="btn-primary flex items-center gap-2" disabled={updating}>
+              <button onClick={handleConfirmAdvance} className="btn-primary flex items-center gap-2" disabled={updating}>
                 {updating ? (
                   <Loader2 className="w-4.5 h-4.5 animate-spin" />
                 ) : (
                   <CheckCircle2 className="w-4.5 h-4.5" />
                 )}
-                确认发货
+                确认
               </button>
             </div>
           </div>

@@ -23,6 +23,7 @@ function mapOrder(row: any, photos: Photo[], logs: StatusLog[]): Order {
       ? { company: row.shipping_company, trackingNo: row.shipping_tracking_no }
       : undefined,
     satisfaction: row.satisfaction ?? undefined,
+    selectionLinkSent: row.selection_link_sent === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -45,6 +46,7 @@ function mapStatusLog(row: any): StatusLog {
     status: row.status,
     timestamp: row.timestamp,
     operator: row.operator,
+    remark: row.remark || undefined,
   };
 }
 
@@ -102,13 +104,13 @@ export const statusLogRepo = {
     return rows.map(mapStatusLog);
   },
 
-  create(orderId: string, status: OrderStatus, operator?: string): StatusLog {
+  create(orderId: string, status: OrderStatus, operator?: string, remark?: string): StatusLog {
     const id = uuidv4();
     const now = new Date().toISOString();
     db.prepare(
-      'INSERT INTO status_logs (id, order_id, status, timestamp, operator) VALUES (?, ?, ?, ?, ?)'
-    ).run(id, orderId, status, now, operator ?? null);
-    return { status, timestamp: now, operator };
+      'INSERT INTO status_logs (id, order_id, status, timestamp, operator, remark) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(id, orderId, status, now, operator ?? null, remark ?? null);
+    return { status, timestamp: now, operator, remark: remark || undefined };
   },
 };
 
@@ -152,7 +154,7 @@ export const orderRepo = {
       FROM orders o
       LEFT JOIN photographers p ON o.photographer_id = p.id
       WHERE o.id = ?
-    `).get(id);
+    `).get(id) as any;
     if (!row) return null;
     const photos = photoRepo.getByOrderId(row.id);
     const logs = statusLogRepo.getByOrderId(row.id);
@@ -165,7 +167,7 @@ export const orderRepo = {
       FROM orders o
       LEFT JOIN photographers p ON o.photographer_id = p.id
       WHERE o.selection_token = ?
-    `).get(token);
+    `).get(token) as any;
     if (!row) return null;
     const photos = photoRepo.getByOrderId(row.id);
     const logs = statusLogRepo.getByOrderId(row.id);
@@ -203,11 +205,11 @@ export const orderRepo = {
     return this.getById(id)!;
   },
 
-  updateStatus(id: string, status: OrderStatus, operator?: string): boolean {
+  updateStatus(id: string, status: OrderStatus, operator?: string, remark?: string): boolean {
     const now = new Date().toISOString();
     const result = db.prepare('UPDATE orders SET status = ?, updated_at = ? WHERE id = ?').run(status, now, id);
     if (result.changes > 0) {
-      statusLogRepo.create(id, status, operator);
+      statusLogRepo.create(id, status, operator, remark);
     }
     return result.changes > 0;
   },
@@ -227,41 +229,57 @@ export const orderRepo = {
     ).run(score, now, id);
     return result.changes > 0;
   },
+
+  updateSelectionLinkSent(id: string, sent: boolean): boolean {
+    const now = new Date().toISOString();
+    const result = db.prepare(
+      'UPDATE orders SET selection_link_sent = ?, updated_at = ? WHERE id = ?'
+    ).run(sent ? 1 : 0, now, id);
+    return result.changes > 0;
+  },
 };
 
 export const statsRepo = {
   getPhotographerStats(month?: string): PhotographerStats[] {
     let dateFilter = '';
+    let satDateFilter = '';
     const params: any[] = [];
 
     if (month) {
       dateFilter = " AND strftime('%Y-%m', o.created_at) = ?";
+      satDateFilter = " AND strftime('%Y-%m', created_at) = ?";
       params.push(month);
     }
 
-    const sql = `
-      SELECT
-        p.id as photographer_id,
-        p.name as photographer_name,
-        COUNT(DISTINCT o.id) as order_count,
-        COALESCE(SUM(CASE WHEN ph.mark = 'album' THEN 1 ELSE 0 END), 0) as total_photos,
-        COALESCE(SUM(CASE WHEN ph.mark IN ('album', 'retouch') THEN 1 ELSE 0 END), 0) as retouch_photos,
-        COALESCE(AVG(o.satisfaction), 0) as avg_satisfaction
-      FROM photographers p
-      LEFT JOIN orders o ON o.photographer_id = p.id ${dateFilter}
-      LEFT JOIN photos ph ON ph.order_id = o.id
-      GROUP BY p.id, p.name
-      ORDER BY total_photos DESC
-    `;
+    const photographers = photographerRepo.listAll();
 
-    const rows = db.prepare(sql).all(...params);
-    return rows.map((row: any) => ({
-      photographerId: row.photographer_id,
-      photographerName: row.photographer_name,
-      totalPhotos: row.total_photos ?? 0,
-      retouchPhotos: row.retouch_photos ?? 0,
-      avgSatisfaction: Math.round((row.avg_satisfaction ?? 0) * 10) / 10,
-      orderCount: row.order_count ?? 0,
-    }));
+    return photographers.map((p) => {
+      const orderRow = db.prepare(`
+        SELECT
+          COUNT(DISTINCT o.id) as order_count,
+          COALESCE(SUM(CASE WHEN ph.mark = 'album' THEN 1 ELSE 0 END), 0) as total_photos,
+          COALESCE(SUM(CASE WHEN ph.mark = 'retouch' THEN 1 ELSE 0 END), 0) as retouch_photos
+        FROM orders o
+        LEFT JOIN photos ph ON ph.order_id = o.id
+        WHERE o.photographer_id = ? ${dateFilter}
+      `).get(p.id, ...params) as any;
+
+      let satParams: any[] = [p.id];
+      if (month) satParams.push(month);
+      const satRow = db.prepare(`
+        SELECT AVG(satisfaction) as avg_sat
+        FROM orders
+        WHERE photographer_id = ? AND status = 'completed' AND satisfaction IS NOT NULL ${satDateFilter}
+      `).get(...satParams) as any;
+
+      return {
+        photographerId: p.id,
+        photographerName: p.name,
+        totalPhotos: orderRow?.total_photos ?? 0,
+        retouchPhotos: orderRow?.retouch_photos ?? 0,
+        avgSatisfaction: Math.round((satRow?.avg_sat ?? 0) * 10) / 10,
+        orderCount: orderRow?.order_count ?? 0,
+      };
+    }).sort((a, b) => b.totalPhotos - a.totalPhotos);
   },
 };

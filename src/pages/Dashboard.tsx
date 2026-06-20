@@ -153,7 +153,7 @@ export default function Dashboard() {
         </button>
 
         <button
-          onClick={() => navigate('/orders')}
+          onClick={() => navigate('/query')}
           className="card-gold p-5 text-left group hover:border-champagne-400 transition-all"
         >
           <div className="flex items-center gap-4">
@@ -162,14 +162,14 @@ export default function Dashboard() {
             </div>
             <div className="flex-1">
               <div className="font-display text-lg font-semibold text-ink-charcoal mb-0.5">进度查询</div>
-              <div className="text-sm text-ink-warm">追踪订单制作状态</div>
+              <div className="text-sm text-ink-warm">追踪客户订单制作进度</div>
             </div>
             <ArrowRight className="w-5 h-5 text-champagne-500 group-hover:translate-x-1 transition-transform" />
           </div>
         </button>
 
         <button
-          onClick={() => navigate('/orders')}
+          onClick={() => navigate('/statistics')}
           className="card-gold p-5 text-left group hover:border-champagne-400 transition-all"
         >
           <div className="flex items-center gap-4">

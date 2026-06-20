@@ -92,6 +92,7 @@ export const api = {
     data: {
       status: OrderStatus;
       operator?: string;
+      remark?: string;
       shipping?: { company: string; trackingNo: string };
       satisfaction?: number;
     }
@@ -99,6 +100,12 @@ export const api = {
     request<Order>(`/orders/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify(data),
+    }),
+
+  markSelectionLinkSent: (id: string, sent: boolean) =>
+    request<Order>(`/orders/${id}/selection-link-sent`, {
+      method: 'PATCH',
+      body: JSON.stringify({ sent }),
     }),
 
   queryOrders: (keyword: string) => request<Order[]>(`/query?keyword=${encodeURIComponent(keyword)}`),

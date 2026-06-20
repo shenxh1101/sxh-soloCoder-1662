@@ -132,11 +132,11 @@ router.post('/selection/:token', (req: Request, res: Response) => {
 });
 
 router.patch('/orders/:id/status', (req: Request, res: Response) => {
-  const { status, operator }: { status: OrderStatus; operator?: string } = req.body;
+  const { status, operator, remark }: { status: OrderStatus; operator?: string; remark?: string } = req.body;
   const order = orderRepo.getById(req.params.id);
   if (!order) return res.status(404).json({ error: '订单不存在' });
 
-  orderRepo.updateStatus(req.params.id, status, operator);
+  orderRepo.updateStatus(req.params.id, status, operator, remark);
 
   if (status === 'shipping' && req.body.shipping) {
     orderRepo.updateShipping(req.params.id, req.body.shipping.company, req.body.shipping.trackingNo);
@@ -146,6 +146,14 @@ router.patch('/orders/:id/status', (req: Request, res: Response) => {
     orderRepo.updateSatisfaction(req.params.id, Number(req.body.satisfaction));
   }
 
+  res.json(orderRepo.getById(req.params.id));
+});
+
+router.patch('/orders/:id/selection-link-sent', (req: Request, res: Response) => {
+  const { sent } = req.body;
+  const order = orderRepo.getById(req.params.id);
+  if (!order) return res.status(404).json({ error: '订单不存在' });
+  orderRepo.updateSelectionLinkSent(req.params.id, !!sent);
   res.json(orderRepo.getById(req.params.id));
 });
 

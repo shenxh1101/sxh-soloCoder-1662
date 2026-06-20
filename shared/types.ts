@@ -40,6 +40,7 @@ export interface StatusLog {
   status: OrderStatus;
   timestamp: string;
   operator?: string;
+  remark?: string;
 }
 
 export interface ShippingInfo {
@@ -61,6 +62,7 @@ export interface Order {
   statusHistory: StatusLog[];
   shipping?: ShippingInfo;
   satisfaction?: number;
+  selectionLinkSent?: boolean;
   createdAt: string;
   updatedAt: string;
 }
