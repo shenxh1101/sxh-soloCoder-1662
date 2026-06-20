@@ -1,0 +1,127 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;600;700&family=Playfair+Display:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Noto Sans SC', system-ui, sans-serif;
+  line-height: 1.6;
+  font-weight: 400;
+  color: #2D2A26;
+  background-color: #FAF6F1;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(201, 169, 97, 0.08), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 0%, rgba(232, 196, 196, 0.06), transparent);
+  background-attachment: fixed;
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-6 py-2.5 rounded-lg font-medium text-white transition-all duration-200
+           bg-gradient-to-r from-champagne-500 to-champagne-600
+           hover:from-champagne-600 hover:to-champagne-700
+           hover:-translate-y-0.5 hover:shadow-glow
+           active:translate-y-0 active:shadow-soft
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-2.5 rounded-lg font-medium transition-all duration-200
+           border border-champagne-300 text-champagne-700 bg-white/80
+           hover:border-champagne-400 hover:bg-champagne-50
+           hover:-translate-y-0.5 hover:shadow-soft;
+  }
+
+  .btn-ghost {
+    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200
+           text-ink-warm hover:text-ink-charcoal hover:bg-cream/80;
+  }
+
+  .card {
+    @apply bg-white rounded-2xl border border-champagne-100 shadow-card
+           transition-all duration-300 hover:shadow-soft;
+  }
+
+  .card-gold {
+    @apply bg-white rounded-2xl border border-champagne-200 shadow-card;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-2.5 rounded-lg border border-champagne-200 bg-ivory/50
+           text-ink-charcoal placeholder:text-ink-warm/40
+           focus:outline-none focus:ring-2 focus:ring-champagne-300/50 focus:border-champagne-400
+           transition-all duration-200;
+  }
+
+  .input-label {
+    @apply block text-sm font-medium text-ink-charcoal mb-1.5;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium;
+  }
+
+  .gold-divider {
+    @apply h-px bg-gradient-to-r from-transparent via-champagne-300 to-transparent;
+  }
+
+  .section-title {
+    @apply font-display text-2xl font-semibold text-ink-charcoal tracking-wide;
+  }
+
+  .subtitle {
+    @apply text-sm text-ink-warm;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(201, 169, 97, 0.3);
+    border-radius: 3px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: rgba(201, 169, 97, 0.5);
+  }
+
+  .text-gradient-gold {
+    @apply bg-gradient-to-r from-champagne-500 to-champagne-700 bg-clip-text text-transparent;
+  }
+
+  .stagger-children > * {
+    opacity: 0;
+    animation: staggerIn 0.5s ease-out forwards;
+  }
+  .stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+  .stagger-children > *:nth-child(2) { animation-delay: 50ms; }
+  .stagger-children > *:nth-child(3) { animation-delay: 100ms; }
+  .stagger-children > *:nth-child(4) { animation-delay: 150ms; }
+  .stagger-children > *:nth-child(5) { animation-delay: 200ms; }
+  .stagger-children > *:nth-child(6) { animation-delay: 250ms; }
+  .stagger-children > *:nth-child(7) { animation-delay: 300ms; }
+  .stagger-children > *:nth-child(8) { animation-delay: 350ms; }
+}
+
+@keyframes staggerIn {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
