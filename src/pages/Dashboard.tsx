@@ -11,9 +11,18 @@ import {
   Activity,
   ArrowRight,
   Sparkles,
+  UserCheck,
+  AlertTriangle,
+  User,
 } from 'lucide-react';
 import { api } from '@/api/client';
-import { ORDER_STATUS_LABELS, type Order, type OrderStatus } from '@shared/types';
+import {
+  ORDER_STATUS_LABELS,
+  PRODUCTION_STAGE_LABELS,
+  type Order,
+  type OrderStatus,
+  type AssigneeTodo,
+} from '@shared/types';
 import { cn } from '@/lib/utils';
 import Layout from '@/components/Layout';
 
@@ -43,12 +52,19 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [todos, setTodos] = useState<AssigneeTodo[]>([]);
+  const [todosLoading, setTodosLoading] = useState(true);
+  const [activeAssignee, setActiveAssignee] = useState<string>('__all__');
 
   useEffect(() => {
     api.getOrders().then((data) => {
       setOrders(data);
       setLoading(false);
     }).catch(() => setLoading(false));
+    api.getAssigneeTodos().then((data) => {
+      setTodos(data);
+      setTodosLoading(false);
+    }).catch(() => setTodosLoading(false));
   }, []);
 
   const inProgressCount = orders.filter((o) =>
@@ -246,6 +262,156 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      <div className="card-gold p-6 mt-8">
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-sky-400 to-sky-600 flex items-center justify-center text-white">
+              <UserCheck className="w-4.5 h-4.5" />
+            </div>
+            <div>
+              <h2 className="font-display text-xl font-semibold text-ink-charcoal">制作待办</h2>
+              <p className="text-xs text-ink-warm">按负责人查看未完成的制作任务</p>
+            </div>
+          </div>
+          {!todosLoading && (
+            <div className="flex items-center gap-2 text-xs">
+              {todos.filter((t) => t.overdue).length > 0 && (
+                <span className="flex items-center gap-1 text-red-600 font-medium">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  {todos.filter((t) => t.overdue).length} 项超期
+                </span>
+              )}
+              <button onClick={() => navigate('/orders')} className="btn-ghost text-sm flex items-center gap-1 ml-2">
+                全部订单 <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="gold-divider mb-5" />
+
+        {todosLoading ? (
+          <div className="py-12 text-center text-ink-warm">加载中...</div>
+        ) : todos.length === 0 ? (
+          <div className="py-12 text-center text-ink-warm">
+            <UserCheck className="w-12 h-12 mx-auto mb-3 opacity-30" />
+            <p>暂无未完成的制作任务</p>
+          </div>
+        ) : (
+          <>
+            {(() => {
+              const allAssignees = Array.from(new Set(todos.map((t) => t.assignee).filter(Boolean))) as string[];
+              const filtered = activeAssignee === '__all__'
+                ? todos
+                : todos.filter((t) => t.assignee === activeAssignee);
+              const overdue = filtered.filter((t) => t.overdue);
+              const normal = filtered.filter((t) => !t.overdue);
+
+              return (
+                <div>
+                  <div className="flex flex-wrap gap-2 mb-5">
+                    <button
+                      onClick={() => setActiveAssignee('__all__')}
+                      className={cn(
+                        'h-7 px-3 rounded-full text-xs font-medium border transition-all',
+                        activeAssignee === '__all__'
+                          ? 'bg-champagne-500 text-white border-champagne-500'
+                          : 'bg-cream/50 text-ink-charcoal border-champagne-100 hover:bg-champagne-50'
+                      )}
+                    >
+                      全部 ({todos.length})
+                    </button>
+                    {allAssignees.map((name) => {
+                      const count = todos.filter((t) => t.assignee === name).length;
+                      return (
+                        <button
+                          key={name}
+                          onClick={() => setActiveAssignee(name)}
+                          className={cn(
+                            'h-7 px-3 rounded-full text-xs font-medium border transition-all flex items-center gap-1.5',
+                            activeAssignee === name
+                              ? 'bg-champagne-500 text-white border-champagne-500'
+                              : 'bg-cream/50 text-ink-charcoal border-champagne-100 hover:bg-champagne-50'
+                          )}
+                        >
+                          <User className="w-3 h-3" />
+                          {name} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {overdue.length > 0 && (
+                    <div className="mb-5">
+                      <div className="text-xs font-semibold text-red-600 mb-2 flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        超期任务 ({overdue.length})
+                      </div>
+                      <div className="space-y-2">
+                        {overdue.map((t) => (
+                          <div
+                            key={`${t.orderId}-${t.stage}`}
+                            onClick={() => navigate(`/orders/${t.orderId}`)}
+                            className="flex items-center gap-3 p-3 rounded-xl bg-red-50/60 border border-red-100 cursor-pointer hover:bg-red-50 transition-colors"
+                          >
+                            <div className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium text-ink-charcoal text-sm">{t.customerName}</span>
+                                <span className="text-xs text-ink-warm">{t.orderNo}</span>
+                                <span className="badge bg-white text-champagne-700 border-champagne-200 border">
+                                  {PRODUCTION_STAGE_LABELS[t.stage]}
+                                </span>
+                              </div>
+                              <div className="text-xs text-red-600 mt-0.5">
+                                截止日期 {t.dueDate ? new Date(t.dueDate).toLocaleDateString('zh-CN') : '未设置'}
+                              </div>
+                            </div>
+                            <ArrowRight className="w-4 h-4 text-red-400 shrink-0" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {normal.length > 0 && (
+                    <div>
+                      <div className="text-xs font-semibold text-ink-warm mb-2">进行中 ({normal.length})</div>
+                      <div className="space-y-2">
+                        {normal.map((t) => (
+                          <div
+                            key={`${t.orderId}-${t.stage}`}
+                            onClick={() => navigate(`/orders/${t.orderId}`)}
+                            className="flex items-center gap-3 p-3 rounded-xl bg-cream/40 cursor-pointer hover:bg-champagne-50 transition-colors"
+                          >
+                            <div className="w-2 h-2 rounded-full bg-champagne-400 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium text-ink-charcoal text-sm">{t.customerName}</span>
+                                <span className="text-xs text-ink-warm">{t.orderNo}</span>
+                                <span className="badge bg-white text-champagne-700 border-champagne-200 border">
+                                  {PRODUCTION_STAGE_LABELS[t.stage]}
+                                </span>
+                              </div>
+                              {t.dueDate && (
+                                <div className="text-xs text-ink-warm mt-0.5">
+                                  截止 {new Date(t.dueDate).toLocaleDateString('zh-CN')}
+                                </div>
+                              )}
+                            </div>
+                            <ArrowRight className="w-4 h-4 text-ink-warm shrink-0" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </>
         )}
       </div>
       </div>

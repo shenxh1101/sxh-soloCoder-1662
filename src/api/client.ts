@@ -5,6 +5,11 @@ import type {
   PhotographerStats,
   PhotoMark,
   ActivityLog,
+  AssigneeTodo,
+  DeliveryItem,
+  DeliveryItemType,
+  ProductionStage,
+  DeliveryStatus,
 } from '@shared/types';
 
 const API_BASE = '/api';
@@ -121,4 +126,62 @@ export const api = {
 
   getStatistics: (month?: string) =>
     request<PhotographerStats[]>(`/statistics${month ? `?month=${month}` : ''}`),
+
+  updateRemark: (id: string, remark: string, operator?: string) =>
+    request<Order>(`/orders/${id}/remark`, {
+      method: 'POST',
+      body: JSON.stringify({ remark, operator }),
+    }),
+
+  updateAssignment: (
+    id: string,
+    data: { stage: ProductionStage; assignee?: string; dueDate?: string; operator?: string }
+  ) =>
+    request<Order>(`/orders/${id}/assignments`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  getAssigneeTodos: () => request<AssigneeTodo[]>('/assignments/todos'),
+
+  uploadDeliveryItem: (
+    orderId: string,
+    file: File,
+    type: DeliveryItemType,
+    uploadedBy: string,
+    note?: string
+  ) => {
+    return new Promise<DeliveryItem>((resolve, reject) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('type', type);
+      formData.append('uploadedBy', uploadedBy);
+      if (note) formData.append('note', note);
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_BASE}/orders/${orderId}/delivery-items`);
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(JSON.parse(xhr.responseText));
+        } else {
+          reject(new Error('上传失败'));
+        }
+      };
+      xhr.onerror = () => reject(new Error('网络错误'));
+      xhr.send(formData);
+    });
+  },
+
+  deleteDeliveryItem: (itemId: string) =>
+    request(`/delivery-items/${itemId}`, { method: 'DELETE' }),
+
+  updateDeliveryStatus: (
+    id: string,
+    status: DeliveryStatus,
+    operator?: string,
+    signer?: string
+  ) =>
+    request<Order>(`/orders/${id}/delivery-status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, operator, signer }),
+    }),
 };

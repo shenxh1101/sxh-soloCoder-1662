@@ -17,7 +17,42 @@ export type ActivityType =
   | 'selection_submitted'
   | 'shipping_updated'
   | 'satisfaction_updated'
-  | 'remark_updated';
+  | 'remark_updated'
+  | 'delivery_uploaded'
+  | 'delivery_receipt_updated'
+  | 'assignee_updated';
+
+export type DeliveryItemType = 'final_package' | 'album_photo' | 'receipt';
+
+export interface DeliveryItem {
+  id: string;
+  orderId: string;
+  type: DeliveryItemType;
+  filename: string;
+  storedFilename: string;
+  url: string;
+  uploadedBy: string;
+  uploadedAt: string;
+  note?: string;
+}
+
+export type DeliveryStatus = 'pending' | 'in_transit' | 'delivered' | 'signed';
+
+export interface DeliveryInfo {
+  status: DeliveryStatus;
+  signedAt?: string;
+  signer?: string;
+  items: DeliveryItem[];
+}
+
+export type ProductionStage = 'retouching' | 'layouting' | 'producing';
+
+export interface StageAssignment {
+  stage: ProductionStage;
+  assignee?: string;
+  dueDate?: string;
+  completedAt?: string;
+}
 
 export interface Photographer {
   id: string;
@@ -82,6 +117,7 @@ export interface Order {
   shootDate: string;
   packageInfo: PackageInfo;
   status: OrderStatus;
+  remark?: string;
   selectionToken: string;
   selectionLinkSent?: boolean;
   selectionLinkCreatedAt?: string;
@@ -93,6 +129,8 @@ export interface Order {
   activities?: ActivityLog[];
   shipping?: ShippingInfo;
   satisfaction?: number;
+  assignments?: Record<ProductionStage, StageAssignment>;
+  delivery?: DeliveryInfo;
   createdAt: string;
   updatedAt: string;
 }
@@ -105,6 +143,17 @@ export interface PhotographerStats {
   avgSatisfaction: number;
   orderCount: number;
   ratedOrderCount: number;
+}
+
+export interface AssigneeTodo {
+  assignee: string;
+  stage: ProductionStage;
+  orderId: string;
+  orderNo: string;
+  customerName: string;
+  dueDate?: string;
+  overdue: boolean;
+  stageLabel: string;
 }
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
@@ -141,4 +190,23 @@ export const PHOTO_MARK_LABELS: Record<PhotoMark, string> = {
   album: '入册',
   retouch: '精修',
   none: '不选',
+};
+
+export const DELIVERY_ITEM_TYPE_LABELS: Record<DeliveryItemType, string> = {
+  final_package: '成片数据包',
+  album_photo: '相册交付照',
+  receipt: '签收凭证',
+};
+
+export const DELIVERY_STATUS_LABELS: Record<DeliveryStatus, string> = {
+  pending: '待交付',
+  in_transit: '配送中',
+  delivered: '已送达',
+  signed: '已签收',
+};
+
+export const PRODUCTION_STAGE_LABELS: Record<ProductionStage, string> = {
+  retouching: '精修',
+  layouting: '排版',
+  producing: '相册制作',
 };

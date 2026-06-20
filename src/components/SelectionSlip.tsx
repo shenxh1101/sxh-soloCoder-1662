@@ -3,6 +3,18 @@ import type { Photo, PhotoMark, Order } from '@shared/types';
 import { PHOTO_MARK_LABELS } from '@shared/types';
 import { cn } from '@/lib/utils';
 
+function escapeHtml(str: string | null | undefined): string {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/`/g, '&#96;')
+    .replace(/\n/g, '<br>');
+}
+
 interface SelectionSlipProps {
   order: Order;
   photos?: Photo[];
@@ -47,9 +59,9 @@ export default function SelectionSlip({
       .map(
         (p) => `
         <tr>
-          <td class="remark-filename">${p.filename}</td>
-          <td class="remark-mark">${PHOTO_MARK_LABELS[(p.mark as PhotoMark) || 'none']}</td>
-          <td class="remark-text">${p.remark}</td>
+          <td class="remark-filename">${escapeHtml(p.filename)}</td>
+          <td class="remark-mark">${escapeHtml(PHOTO_MARK_LABELS[(p.mark as PhotoMark) || 'none'])}</td>
+          <td class="remark-text">${escapeHtml(p.remark)}</td>
         </tr>
       `
       )
@@ -60,7 +72,7 @@ export default function SelectionSlip({
       <html lang="zh-CN">
       <head>
         <meta charset="UTF-8">
-        <title>选片确认单 - ${order.orderNo}</title>
+        <title>选片确认单 - ${escapeHtml(order.orderNo)}</title>
         <style>
           * { box-sizing: border-box; margin: 0; padding: 0; }
           body {
@@ -166,7 +178,7 @@ export default function SelectionSlip({
         <div class="slip-header">
           <div class="slip-title">选片确认单</div>
           <div class="slip-subtitle">
-            订单号：${order.orderNo} ｜ 客户：${order.customer.name} ｜ 摄影顾问：${order.photographerName || '未指派'}
+            订单号：${escapeHtml(order.orderNo)} ｜ 客户：${escapeHtml(order.customer.name)} ｜ 摄影顾问：${escapeHtml(order.photographerName || '未指派')}
           </div>
         </div>
 
@@ -189,7 +201,7 @@ export default function SelectionSlip({
 
         <div class="divider"></div>
 
-        <div class="section-title">📝 修图备注汇总（共 ${remarks.length} 条）</div>
+        <div class="section-title">修图备注汇总（共 ${remarks.length} 条）</div>
         ${
           remarks.length === 0
             ? '<p style="color:#8B8179; font-size:13px; padding:16px 0;">暂无修图备注</p>'

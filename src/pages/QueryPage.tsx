@@ -1,11 +1,30 @@
 import { useState } from 'react';
-import { Search, Phone, User, FileText, Calendar, Package, Truck, Star, ArrowRight } from 'lucide-react';
+import {
+  Search,
+  Phone,
+  User,
+  FileText,
+  Calendar,
+  Package,
+  Truck,
+  Star,
+  ArrowRight,
+  Receipt,
+  FileUp,
+  ImagePlus,
+  ExternalLink,
+} from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '@/api/client';
 import type { Order } from '@shared/types';
-import { ORDER_STATUS_LABELS } from '@shared/types';
+import {
+  ORDER_STATUS_LABELS,
+  DELIVERY_STATUS_LABELS,
+  DELIVERY_ITEM_TYPE_LABELS,
+} from '@shared/types';
 import StatusBadge from '@/components/StatusBadge';
 import Layout from '@/components/Layout';
+import { cn } from '@/lib/utils';
 
 export default function QueryPage() {
   const [keyword, setKeyword] = useState('');
@@ -137,8 +156,75 @@ function OrderResultCard({ order }: { order: Order }) {
             <SparkleIcon className="w-3.5 h-3.5 text-rose-400" />
             精修 <span className="font-mono font-semibold text-rose-400">{order.photos.filter(p => p.mark === 'retouch').length}</span> 张
           </span>
+          {order.delivery?.status && (
+            <span
+              className={cn(
+                'flex items-center gap-1.5 px-2 py-0.5 rounded-full',
+                order.delivery.status === 'signed'
+                  ? 'bg-green-50 text-green-700'
+                  : order.delivery.status === 'in_transit'
+                  ? 'bg-cyan-50 text-cyan-700'
+                  : order.delivery.status === 'delivered'
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'bg-ink-warm/10 text-ink-warm'
+              )}
+            >
+              <Receipt className="w-3.5 h-3.5" />
+              {DELIVERY_STATUS_LABELS[order.delivery.status]}
+            </span>
+          )}
         </div>
       </div>
+
+      {order.delivery && order.delivery.items && order.delivery.items.length > 0 && (
+        <div className="px-5 py-4 border-t border-champagne-100">
+          <div className="flex items-center gap-2 mb-3">
+            <Receipt className="w-4 h-4 text-champagne-500" />
+            <span className="text-sm font-medium text-ink-charcoal">交付资料</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+            {order.delivery.items.map((item) => (
+              <a
+                key={item.id}
+                href={`/api/uploads/${encodeURIComponent(item.storedFilename)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 p-2.5 rounded-lg bg-white border border-champagne-100 hover:border-champagne-300 transition-all group"
+              >
+                <div
+                  className={cn(
+                    'w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0',
+                    item.type === 'final_package'
+                      ? 'bg-gradient-to-br from-indigo-400 to-indigo-600'
+                      : item.type === 'album_photo'
+                      ? 'bg-gradient-to-br from-rose-400 to-rose-600'
+                      : 'bg-gradient-to-br from-emerald-400 to-emerald-600'
+                  )}
+                >
+                  {item.type === 'final_package' ? (
+                    <FileUp className="w-3.5 h-3.5" />
+                  ) : item.type === 'album_photo' ? (
+                    <ImagePlus className="w-3.5 h-3.5" />
+                  ) : (
+                    <Receipt className="w-3.5 h-3.5" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] text-ink-warm">{DELIVERY_ITEM_TYPE_LABELS[item.type]}</div>
+                  <div className="text-xs text-ink-charcoal truncate">{item.filename}</div>
+                </div>
+                <ExternalLink className="w-3.5 h-3.5 text-ink-warm/50 group-hover:text-champagne-500 transition-colors shrink-0" />
+              </a>
+            ))}
+          </div>
+          {order.delivery.signedAt && (
+            <div className="mt-3 text-xs text-ink-warm space-y-0.5 pt-3 border-t border-dashed border-champagne-100">
+              <div>签收时间：{new Date(order.delivery.signedAt).toLocaleString('zh-CN')}</div>
+              {order.delivery.signer && <div>签收人：{order.delivery.signer}</div>}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

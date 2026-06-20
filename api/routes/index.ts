@@ -3,8 +3,17 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { orderRepo, photoRepo, photographerRepo, statsRepo, activityLogRepo, linkSendLogRepo } from '../repositories/index.ts';
-import type { OrderStatus, PhotoMark } from '../../shared/types';
+import {
+  orderRepo,
+  photoRepo,
+  photographerRepo,
+  statsRepo,
+  activityLogRepo,
+  linkSendLogRepo,
+  stageAssignmentRepo,
+  deliveryRepo,
+} from '../repositories/index.ts';
+import type { OrderStatus, PhotoMark, DeliveryItemType, ProductionStage, DeliveryStatus } from '../../shared/types';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -213,6 +222,86 @@ router.get('/photos/:filename', (req: Request, res: Response) => {
   } else {
     res.status(404).json({ error: '文件不存在' });
   }
+});
+
+router.get('/uploads/:filename', (req: Request, res: Response) => {
+  const fp = path.join(uploadDir, req.params.filename);
+  if (fs.existsSync(fp)) {
+    res.sendFile(fp);
+  } else {
+    res.status(404).json({ error: '文件不存在' });
+  }
+});
+
+router.post('/orders/:id/remark', (req: Request, res: Response) => {
+  const { remark, operator } = req.body;
+  const order = orderRepo.getById(req.params.id);
+  if (!order) return res.status(404).json({ error: '订单不存在' });
+  orderRepo.updateRemark(req.params.id, String(remark ?? ''), operator ? String(operator) : undefined);
+  res.json(orderRepo.getById(req.params.id));
+});
+
+router.patch('/orders/:id/assignments', (req: Request, res: Response) => {
+  const { stage, assignee, dueDate, operator } = req.body;
+  const order = orderRepo.getById(req.params.id);
+  if (!order) return res.status(404).json({ error: '订单不存在' });
+  const validStages: ProductionStage[] = ['retouching', 'layouting', 'producing'];
+  if (!validStages.includes(stage)) return res.status(400).json({ error: '阶段参数错误' });
+  stageAssignmentRepo.upsert(req.params.id, stage, {
+    assignee: assignee ? String(assignee) : undefined,
+    dueDate: dueDate ? String(dueDate) : undefined,
+  });
+  activityLogRepo.create(
+    req.params.id,
+    'assignee_updated',
+    `更新${stage === 'retouching' ? '精修' : stage === 'layouting' ? '排版' : '相册制作'}${
+      assignee ? `负责人：${assignee}` : '信息'
+    }${dueDate ? `，预计完成：${new Date(dueDate).toLocaleDateString('zh-CN')}` : ''}`,
+    operator ? String(operator) : '系统',
+    { stage, assignee, dueDate }
+  );
+  res.json(orderRepo.getById(req.params.id));
+});
+
+router.get('/assignments/todos', (_req: Request, res: Response) => {
+  res.json(stageAssignmentRepo.listTodos());
+});
+
+router.post('/orders/:id/delivery-items', upload.single('file'), (req: Request, res: Response) => {
+  const order = orderRepo.getById(req.params.id);
+  if (!order) return res.status(404).json({ error: '订单不存在' });
+  const { type, uploadedBy, note } = req.body;
+  if (!req.file) return res.status(400).json({ error: '未收到文件' });
+  const validTypes: DeliveryItemType[] = ['final_package', 'album_photo', 'receipt'];
+  if (!validTypes.includes(type)) return res.status(400).json({ error: '文件类型错误' });
+  const item = deliveryRepo.addItem(
+    req.params.id,
+    type as DeliveryItemType,
+    req.file.filename,
+    uploadedBy ? String(uploadedBy) : '客服',
+    note ? String(note) : undefined
+  );
+  res.status(201).json(item);
+});
+
+router.delete('/delivery-items/:itemId', (req: Request, res: Response) => {
+  deliveryRepo.removeItem(req.params.itemId);
+  res.json({ success: true });
+});
+
+router.patch('/orders/:id/delivery-status', (req: Request, res: Response) => {
+  const order = orderRepo.getById(req.params.id);
+  if (!order) return res.status(404).json({ error: '订单不存在' });
+  const { status, operator, signer } = req.body;
+  const validStatuses: DeliveryStatus[] = ['pending', 'in_transit', 'delivered', 'signed'];
+  if (!validStatuses.includes(status)) return res.status(400).json({ error: '状态参数错误' });
+  deliveryRepo.updateStatus(
+    req.params.id,
+    status as DeliveryStatus,
+    operator ? String(operator) : undefined,
+    signer ? String(signer) : undefined
+  );
+  res.json(orderRepo.getById(req.params.id));
 });
 
 export default router;

@@ -34,16 +34,29 @@ import {
   Zap,
   FileText,
   AlertTriangle,
+  Upload,
+  Trash2,
+  UserCheck,
+  FileUp,
+  Receipt,
+  ImagePlus,
+  Calendar,
 } from 'lucide-react';
 import { api } from '@/api/client';
 import {
   ORDER_STATUS_LABELS,
   PHOTO_MARK_LABELS,
   PRODUCTION_STATUSES,
+  DELIVERY_ITEM_TYPE_LABELS,
+  DELIVERY_STATUS_LABELS,
+  PRODUCTION_STAGE_LABELS,
   type Order,
   type OrderStatus,
   type PhotoMark,
   type ActivityLog,
+  type ProductionStage,
+  type DeliveryItemType,
+  type DeliveryStatus,
 } from '@shared/types';
 import { cn } from '@/lib/utils';
 import Layout from '@/components/Layout';
@@ -90,6 +103,9 @@ const ACTIVITY_ICONS: Record<string, React.ReactNode> = {
   shipping_updated: <Truck className="w-4 h-4" />,
   satisfaction_updated: <Star className="w-4 h-4" />,
   remark_updated: <Pencil className="w-4 h-4" />,
+  delivery_uploaded: <Upload className="w-4 h-4" />,
+  delivery_receipt_updated: <Check className="w-4 h-4" />,
+  assignee_updated: <UserCheck className="w-4 h-4" />,
 };
 
 const ACTIVITY_COLORS: Record<string, string> = {
@@ -100,6 +116,9 @@ const ACTIVITY_COLORS: Record<string, string> = {
   shipping_updated: 'from-cyan-400 to-cyan-600',
   satisfaction_updated: 'from-amber-400 to-amber-600',
   remark_updated: 'from-emerald-400 to-emerald-600',
+  delivery_uploaded: 'from-teal-400 to-teal-600',
+  delivery_receipt_updated: 'from-green-400 to-green-600',
+  assignee_updated: 'from-sky-400 to-sky-600',
 };
 
 const NEXT_STATUS: Record<OrderStatus, OrderStatus | null> = {
@@ -139,6 +158,25 @@ export default function OrderDetail() {
   const [linkSentUpdating, setLinkSentUpdating] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [activities, setActivities] = useState<ActivityLog[]>([]);
+  const [showRemarkModal, setShowRemarkModal] = useState(false);
+  const [remarkValue, setRemarkValue] = useState('');
+  const [remarkUpdating, setRemarkUpdating] = useState(false);
+  const [assigneeUpdating, setAssigneeUpdating] = useState<string | null>(null);
+  const [deliveryType, setDeliveryType] = useState<DeliveryItemType>('final_package');
+  const [deliveryNote, setDeliveryNote] = useState('');
+  const [uploadingDelivery, setUploadingDelivery] = useState(false);
+  const [deliveryStatusUpdating, setDeliveryStatusUpdating] = useState(false);
+  const [signerName, setSignerName] = useState('');
+  const [assigneeInput, setAssigneeInput] = useState<Record<ProductionStage, string>>({
+    retouching: '',
+    layouting: '',
+    producing: '',
+  });
+  const [dueDateInput, setDueDateInput] = useState<Record<ProductionStage, string>>({
+    retouching: '',
+    layouting: '',
+    producing: '',
+  });
 
   const refreshOrder = async () => {
     if (!id) return;
@@ -252,6 +290,99 @@ export default function OrderDetail() {
       alert(err instanceof Error ? err.message : '更新失败');
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleOpenRemarkModal = () => {
+    setRemarkValue(order?.remark || '');
+    setShowRemarkModal(true);
+  };
+
+  const handleUpdateRemark = async () => {
+    if (!order) return;
+    setRemarkUpdating(true);
+    try {
+      const updated = await api.updateRemark(order.id, remarkValue.trim());
+      setOrder(updated);
+      if (updated.activities) setActivities(updated.activities);
+      setShowRemarkModal(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '更新失败');
+    } finally {
+      setRemarkUpdating(false);
+    }
+  };
+
+  const handleUpdateAssignee = async (stage: ProductionStage) => {
+    if (!order) return;
+    setAssigneeUpdating(stage);
+    try {
+      const updated = await api.updateAssignment(order.id, {
+        stage,
+        assignee: assigneeInput[stage]?.trim() || undefined,
+        dueDate: dueDateInput[stage] || undefined,
+      });
+      setOrder(updated);
+      if (updated.activities) setActivities(updated.activities);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '更新失败');
+    } finally {
+      setAssigneeUpdating(null);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!order) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingDelivery(true);
+    try {
+      await api.uploadDeliveryItem(order.id, file, deliveryType, '客服', deliveryNote.trim() || undefined);
+      const updated = await api.getOrder(order.id);
+      setOrder(updated);
+      if (updated.activities) setActivities(updated.activities);
+      setDeliveryNote('');
+      e.target.value = '';
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '上传失败');
+    } finally {
+      setUploadingDelivery(false);
+    }
+  };
+
+  const handleDeleteDeliveryItem = async (itemId: string) => {
+    if (!order || !confirm('确定要删除该交付资料吗？')) return;
+    try {
+      await api.deleteDeliveryItem(itemId);
+      const updated = await api.getOrder(order.id);
+      setOrder(updated);
+      if (updated.activities) setActivities(updated.activities);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '删除失败');
+    }
+  };
+
+  const handleUpdateDeliveryStatus = async (status: DeliveryStatus) => {
+    if (!order) return;
+    if (status === 'signed' && !signerName.trim()) {
+      alert('请填写签收人姓名');
+      return;
+    }
+    setDeliveryStatusUpdating(true);
+    try {
+      const updated = await api.updateDeliveryStatus(
+        order.id,
+        status,
+        '客服',
+        status === 'signed' ? signerName.trim() : undefined
+      );
+      setOrder(updated);
+      if (updated.activities) setActivities(updated.activities);
+      setSignerName('');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '更新失败');
+    } finally {
+      setDeliveryStatusUpdating(false);
     }
   };
 
@@ -492,6 +623,323 @@ export default function OrderDetail() {
               重新生成链接
             </button>
           </div>
+
+          <div className="card-gold p-5">
+            <div className="flex items-center gap-2.5 mb-4">
+              <MessageSquare className="w-4.5 h-4.5 text-champagne-500" />
+              <h3 className="font-display text-lg font-semibold text-ink-charcoal">订单备注</h3>
+              <button
+                onClick={handleOpenRemarkModal}
+                className="ml-auto flex items-center gap-1 text-xs text-champagne-700 hover:text-champagne-800"
+              >
+                <Pencil className="w-3 h-3" />
+                修改
+              </button>
+            </div>
+            <div className="gold-divider mb-4" />
+            <div className="text-sm text-ink-charcoal whitespace-pre-wrap leading-relaxed min-h-[40px]">
+              {order.remark ? (
+                <p>{order.remark}</p>
+              ) : (
+                <p className="text-ink-warm italic">暂无备注，点击右上角"修改"添加</p>
+              )}
+            </div>
+          </div>
+
+          {(currentStatusIndex >= 3 || order.status === 'selected') && (
+            <div className="card-gold p-5">
+              <div className="flex items-center gap-2.5 mb-4">
+                <UserCheck className="w-4.5 h-4.5 text-champagne-500" />
+                <h3 className="font-display text-lg font-semibold text-ink-charcoal">制作阶段负责人</h3>
+              </div>
+              <div className="gold-divider mb-4" />
+              <div className="space-y-3">
+                {(['retouching', 'layouting', 'producing'] as ProductionStage[]).map((stage) => {
+                  const stageIdx = PRODUCTION_STATUSES.indexOf(stage);
+                  const isStageDone = currentStatusIndex > stageIdx;
+                  const isCurrent = currentStatusIndex === stageIdx;
+                  const saved = order.assignments?.[stage];
+                  const assigneeVal = assigneeInput[stage] || (saved?.assignee ?? '') || '';
+                  const dueVal =
+                    dueDateInput[stage] ||
+                    (saved?.dueDate ? saved.dueDate.slice(0, 10) : '') ||
+                    '';
+                  const isOverdue = saved?.dueDate && !saved?.completedAt && new Date(saved.dueDate) < new Date();
+                  return (
+                    <div key={stage} className="p-3 rounded-xl bg-cream/40 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              'text-sm font-medium',
+                              isStageDone ? 'text-ink-warm/60 line-through' : 'text-ink-charcoal',
+                              isCurrent && 'text-champagne-700'
+                            )}
+                          >
+                            {PRODUCTION_STAGE_LABELS[stage]}
+                          </span>
+                          {isCurrent && (
+                            <span className="badge bg-champagne-100 text-champagne-700 border-0 text-[10px] py-0 px-2">
+                              当前阶段
+                            </span>
+                          )}
+                          {isStageDone && saved?.completedAt && (
+                            <span className="text-[11px] text-green-600">
+                              ✔ {new Date(saved.completedAt).toLocaleDateString('zh-CN')}
+                            </span>
+                          )}
+                        </div>
+                        {isOverdue && !isStageDone && (
+                          <span className="badge bg-red-50 text-red-700 border-red-200 text-[10px] py-0 px-2">
+                            已超期
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div className="relative">
+                          <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-warm/60" />
+                          <input
+                            type="text"
+                            placeholder="负责人姓名"
+                            value={assigneeVal}
+                            disabled={isStageDone}
+                            onChange={(e) =>
+                              setAssigneeInput((prev) => ({ ...prev, [stage]: e.target.value }))
+                            }
+                            className="w-full h-8 pl-8 pr-3 rounded-lg border border-champagne-100 bg-white text-sm text-ink-charcoal placeholder:text-ink-warm/50 focus:outline-none focus:ring-2 focus:ring-champagne-200 disabled:bg-cream/60 disabled:text-ink-warm/60"
+                          />
+                        </div>
+                        <div className="relative">
+                          <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-warm/60" />
+                          <input
+                            type="date"
+                            value={dueVal}
+                            disabled={isStageDone}
+                            onChange={(e) =>
+                              setDueDateInput((prev) => ({ ...prev, [stage]: e.target.value }))
+                            }
+                            className="w-full h-8 pl-8 pr-3 rounded-lg border border-champagne-100 bg-white text-sm text-ink-charcoal focus:outline-none focus:ring-2 focus:ring-champagne-200 disabled:bg-cream/60 disabled:text-ink-warm/60"
+                          />
+                        </div>
+                      </div>
+                      {!isStageDone && (
+                        <button
+                          onClick={() => handleUpdateAssignee(stage)}
+                          disabled={assigneeUpdating === stage}
+                          className="w-full h-7 rounded-md text-xs font-medium text-champagne-700 bg-champagne-50 hover:bg-champagne-100 border border-champagne-200 transition-all disabled:opacity-50"
+                        >
+                          {assigneeUpdating === stage ? (
+                            <Loader2 className="w-3 h-3 animate-spin mx-auto" />
+                          ) : (
+                            '保存'
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {currentStatusIndex >= 6 || order.status === 'shipping' || order.status === 'completed' ? (
+            <div className="card-gold p-5">
+              <div className="flex items-center gap-2.5 mb-4">
+                <Receipt className="w-4.5 h-4.5 text-champagne-500" />
+                <h3 className="font-display text-lg font-semibold text-ink-charcoal">交付验收</h3>
+                {order.delivery?.status && (
+                  <span
+                    className={cn(
+                      'badge ml-auto',
+                      order.delivery.status === 'signed'
+                        ? 'bg-green-50 text-green-700 border-0'
+                        : order.delivery.status === 'in_transit'
+                        ? 'bg-cyan-50 text-cyan-700 border-0'
+                        : order.delivery.status === 'delivered'
+                        ? 'bg-blue-50 text-blue-700 border-0'
+                        : 'bg-ink-warm/10 text-ink-warm border-0'
+                    )}
+                  >
+                    {DELIVERY_STATUS_LABELS[order.delivery.status]}
+                  </span>
+                )}
+              </div>
+              <div className="gold-divider mb-4" />
+
+              {(order.status === 'shipping' || order.status === 'completed') && (
+                <div className="space-y-2 mb-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <select
+                      value={deliveryType}
+                      onChange={(e) => setDeliveryType(e.target.value as DeliveryItemType)}
+                      className="h-9 px-3 rounded-lg border border-champagne-100 bg-white text-sm text-ink-charcoal focus:outline-none focus:ring-2 focus:ring-champagne-200"
+                    >
+                      <option value="final_package">最终成片包</option>
+                      <option value="album_photo">相册交付照片</option>
+                      <option value="receipt">签收凭证</option>
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="备注（可选）"
+                      value={deliveryNote}
+                      onChange={(e) => setDeliveryNote(e.target.value)}
+                      className="h-9 px-3 rounded-lg border border-champagne-100 bg-white text-sm text-ink-charcoal placeholder:text-ink-warm/50 focus:outline-none focus:ring-2 focus:ring-champagne-200"
+                    />
+                  </div>
+                  <label className="block">
+                    <input
+                      type="file"
+                      accept="*/*"
+                      disabled={uploadingDelivery}
+                      onChange={handleFileUpload}
+                      className="hidden"
+                      id="delivery-upload"
+                    />
+                    <div className="w-full h-10 rounded-lg border-2 border-dashed border-champagne-200 bg-cream/40 hover:bg-cream hover:border-champagne-300 flex items-center justify-center gap-2 text-sm text-champagne-700 cursor-pointer transition-all disabled:opacity-50">
+                      {uploadingDelivery ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          上传中...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-4 h-4" />
+                          点击选择文件上传
+                        </>
+                      )}
+                    </div>
+                  </label>
+                </div>
+              )}
+
+              {order.delivery?.items && order.delivery.items.length > 0 && (
+                <div className="space-y-2 mb-4">
+                  <div className="text-xs font-medium text-ink-warm mb-1">
+                    已上传 ({order.delivery.items.length})
+                  </div>
+                  <div className="space-y-2">
+                    {order.delivery.items.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center gap-2 p-2.5 rounded-lg bg-cream/40"
+                      >
+                        <div
+                          className={cn(
+                            'w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0',
+                            item.type === 'final_package'
+                              ? 'bg-gradient-to-br from-indigo-400 to-indigo-600'
+                              : item.type === 'album_photo'
+                              ? 'bg-gradient-to-br from-rose-400 to-rose-600'
+                              : 'bg-gradient-to-br from-emerald-400 to-emerald-600'
+                          )}
+                        >
+                          {item.type === 'final_package' ? (
+                            <FileUp className="w-3.5 h-3.5" />
+                          ) : item.type === 'album_photo' ? (
+                            <ImagePlus className="w-3.5 h-3.5" />
+                          ) : (
+                            <Receipt className="w-3.5 h-3.5" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs text-ink-warm">
+                            {DELIVERY_ITEM_TYPE_LABELS[item.type]}
+                          </div>
+                          <div className="text-sm text-ink-charcoal truncate">{item.filename}</div>
+                          {item.note && (
+                            <div className="text-xs text-ink-warm mt-0.5">{item.note}</div>
+                          )}
+                        </div>
+                        <a
+                          href={`/api/uploads/${encodeURIComponent(item.storedFilename)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="p-1.5 rounded-lg text-champagne-700 hover:bg-champagne-100 transition"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                        <button
+                          onClick={() => handleDeleteDeliveryItem(item.id)}
+                          className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(!order.delivery?.items || order.delivery.items.length === 0) && (
+                <div className="py-6 text-center text-ink-warm text-sm mb-4">
+                  暂未上传交付资料
+                </div>
+              )}
+
+              {(order.status === 'shipping' || order.status === 'completed') && (
+                <>
+                  <div className="gold-divider mb-4" />
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-ink-warm mb-1">更新交付状态</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        onClick={() => handleUpdateDeliveryStatus('in_transit')}
+                        disabled={deliveryStatusUpdating}
+                        className={cn(
+                          'h-9 rounded-lg text-xs font-medium transition-all',
+                          order.delivery?.status === 'in_transit'
+                            ? 'bg-cyan-500 text-white'
+                            : 'bg-cyan-50 text-cyan-700 hover:bg-cyan-100'
+                        )}
+                      >
+                        配送中
+                      </button>
+                      <button
+                        onClick={() => handleUpdateDeliveryStatus('delivered')}
+                        disabled={deliveryStatusUpdating}
+                        className={cn(
+                          'h-9 rounded-lg text-xs font-medium transition-all',
+                          order.delivery?.status === 'delivered'
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                        )}
+                      >
+                        已送达
+                      </button>
+                      <div className="flex gap-1">
+                        <input
+                          type="text"
+                          placeholder="签收人"
+                          value={signerName}
+                          onChange={(e) => setSignerName(e.target.value)}
+                          className="flex-1 min-w-0 h-9 px-2 rounded-lg border border-champagne-100 bg-white text-xs text-ink-charcoal placeholder:text-ink-warm/50 focus:outline-none focus:ring-2 focus:ring-champagne-200"
+                        />
+                        <button
+                          onClick={() => handleUpdateDeliveryStatus('signed')}
+                          disabled={deliveryStatusUpdating}
+                          className={cn(
+                            'h-9 px-3 rounded-lg text-xs font-medium transition-all shrink-0',
+                            order.delivery?.status === 'signed'
+                              ? 'bg-green-500 text-white'
+                              : 'bg-green-50 text-green-700 hover:bg-green-100'
+                          )}
+                        >
+                          签收
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {order.delivery?.signedAt && (
+                <div className="mt-4 text-xs text-ink-warm space-y-1 pt-3 border-t border-champagne-100">
+                  <div>签收时间：{new Date(order.delivery.signedAt).toLocaleString('zh-CN')}</div>
+                  {order.delivery.signer && <div>签收人：{order.delivery.signer}</div>}
+                </div>
+              )}
+            </div>
+          ) : null}
 
           {order.shipping && (
             <div className="card-gold p-5">
@@ -792,6 +1240,46 @@ export default function OrderDetail() {
                   <CheckCircle2 className="w-4.5 h-4.5" />
                 )}
                 确认
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRemarkModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="card-gold w-full max-w-md p-6">
+            <div className="flex items-center gap-2.5 mb-5">
+              <MessageSquare className="w-5 h-5 text-champagne-500" />
+              <h3 className="font-display text-xl font-semibold text-ink-charcoal">修改订单备注</h3>
+            </div>
+            <div className="gold-divider mb-5" />
+            <textarea
+              value={remarkValue}
+              onChange={(e) => setRemarkValue(e.target.value)}
+              placeholder="记录订单相关的补充信息、特殊要求等"
+              rows={5}
+              className="input-field resize-none"
+            />
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setShowRemarkModal(false)}
+                className="btn-secondary"
+                disabled={remarkUpdating}
+              >
+                取消
+              </button>
+              <button
+                onClick={handleUpdateRemark}
+                className="btn-primary flex items-center gap-2"
+                disabled={remarkUpdating}
+              >
+                {remarkUpdating ? (
+                  <Loader2 className="w-4.5 h-4.5 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-4.5 h-4.5" />
+                )}
+                保存
               </button>
             </div>
           </div>

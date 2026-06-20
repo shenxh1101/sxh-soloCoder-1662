@@ -9,10 +9,36 @@ import type {
   PhotoMark,
   ActivityLog,
   ActivityType,
+  DeliveryItem,
+  DeliveryItemType,
+  DeliveryStatus,
+  ProductionStage,
+  StageAssignment,
+  AssigneeTodo,
 } from '../../shared/types';
+import { PRODUCTION_STAGE_LABELS } from '../../shared/types';
 import { v4 as uuidv4 } from 'uuid';
 
-function mapOrder(row: any, photos: Photo[], logs: StatusLog[], activities?: ActivityLog[]): Order {
+export function escapeHtml(str: string | null | undefined): string {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/`/g, '&#96;')
+    .replace(/\n/g, '<br>');
+}
+
+function mapOrder(
+  row: any,
+  photos: Photo[],
+  logs: StatusLog[],
+  activities?: ActivityLog[],
+  assignments?: Record<ProductionStage, StageAssignment>,
+  delivery?: { status: DeliveryStatus; signedAt?: string; signer?: string; items: DeliveryItem[] }
+): Order {
   return {
     id: row.id,
     orderNo: row.order_no,
@@ -26,6 +52,7 @@ function mapOrder(row: any, photos: Photo[], logs: StatusLog[], activities?: Act
       retouchCount: row.retouch_count,
     },
     status: row.status,
+    remark: row.remark ?? undefined,
     selectionToken: row.selection_token,
     selectionLinkSent: row.selection_link_sent === 1,
     selectionLinkCreatedAt: row.selection_link_created_at,
@@ -33,10 +60,13 @@ function mapOrder(row: any, photos: Photo[], logs: StatusLog[], activities?: Act
     photos,
     statusHistory: logs,
     activities: activities || [],
-    shipping: row.shipping_company && row.shipping_tracking_no
-      ? { company: row.shipping_company, trackingNo: row.shipping_tracking_no }
-      : undefined,
+    shipping:
+      row.shipping_company && row.shipping_tracking_no
+        ? { company: row.shipping_company, trackingNo: row.shipping_tracking_no }
+        : undefined,
     satisfaction: row.satisfaction ?? undefined,
+    assignments,
+    delivery,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -63,12 +93,25 @@ function mapStatusLog(row: any): StatusLog {
   };
 }
 
+function mapDeliveryItem(row: any): DeliveryItem {
+  return {
+    id: row.id,
+    orderId: row.order_id,
+    type: row.type as DeliveryItemType,
+    filename: row.filename,
+    storedFilename: row.url,
+    url: row.filename.startsWith('http') ? row.filename : `/api/uploads/${row.url}`,
+    uploadedBy: row.uploaded_by,
+    uploadedAt: row.uploaded_at,
+    note: row.note || undefined,
+  };
+}
+
 export const photographerRepo = {
   listAll(): Photographer[] {
     const rows = db.prepare('SELECT id, name FROM photographers ORDER BY name').all();
     return rows as Photographer[];
   },
-
   getById(id: string): Photographer | null {
     const row = db.prepare('SELECT id, name FROM photographers WHERE id = ?').get(id);
     return row ? (row as Photographer) : null;
@@ -80,7 +123,6 @@ export const photoRepo = {
     const rows = db.prepare('SELECT * FROM photos WHERE order_id = ? ORDER BY uploaded_at').all(orderId);
     return rows.map(mapPhoto);
   },
-
   create(orderId: string, filename: string): Photo {
     const id = uuidv4();
     const now = new Date().toISOString();
@@ -97,12 +139,10 @@ export const photoRepo = {
       uploadedAt: now,
     };
   },
-
   delete(id: string): boolean {
     const result = db.prepare('DELETE FROM photos WHERE id = ?').run(id);
     return result.changes > 0;
   },
-
   updateMark(id: string, mark: PhotoMark | null, remark: string | null): boolean {
     const result = db.prepare('UPDATE photos SET mark = ?, remark = ? WHERE id = ?').run(mark, remark, id);
     return result.changes > 0;
@@ -111,12 +151,9 @@ export const photoRepo = {
 
 export const statusLogRepo = {
   getByOrderId(orderId: string): StatusLog[] {
-    const rows = db.prepare(
-      'SELECT * FROM status_logs WHERE order_id = ? ORDER BY timestamp'
-    ).all(orderId);
+    const rows = db.prepare('SELECT * FROM status_logs WHERE order_id = ? ORDER BY timestamp').all(orderId);
     return rows.map(mapStatusLog);
   },
-
   create(orderId: string, status: OrderStatus, operator?: string, remark?: string): StatusLog {
     const id = uuidv4();
     const now = new Date().toISOString();
@@ -141,8 +178,13 @@ export const activityLogRepo = {
       detail: row.detail_json ? JSON.parse(row.detail_json) : undefined,
     }));
   },
-
-  create(orderId: string, type: ActivityType, content: string, operator?: string, detail?: any): ActivityLog {
+  create(
+    orderId: string,
+    type: ActivityType,
+    content: string,
+    operator?: string,
+    detail?: any
+  ): ActivityLog {
     const id = uuidv4();
     const now = new Date().toISOString();
     db.prepare(
@@ -164,7 +206,6 @@ export const linkSendLogRepo = {
       operator: row.operator,
     }));
   },
-
   create(orderId: string, method: string, operator?: string): string {
     const id = uuidv4();
     const now = new Date().toISOString();
@@ -173,12 +214,226 @@ export const linkSendLogRepo = {
     ).run(id, orderId, now, method, operator ?? null);
     return now;
   },
-
   countByOrderId(orderId: string): number {
-    const row = db.prepare(
-      'SELECT COUNT(*) as cnt FROM link_send_logs WHERE order_id = ?'
-    ).get(orderId) as { cnt: number };
+    const row = db.prepare('SELECT COUNT(*) as cnt FROM link_send_logs WHERE order_id = ?').get(orderId) as {
+      cnt: number;
+    };
     return row.cnt;
+  },
+};
+
+export const stageAssignmentRepo = {
+  getByOrderId(orderId: string): Record<ProductionStage, StageAssignment> {
+    const rows = db
+      .prepare('SELECT * FROM stage_assignments WHERE order_id = ?')
+      .all(orderId) as any[];
+    const result: Record<string, StageAssignment> = {};
+    const STAGES: ProductionStage[] = ['retouching', 'layouting', 'producing'];
+    for (const s of STAGES) {
+      result[s] = { stage: s };
+    }
+    for (const r of rows) {
+      if (r.stage in result) {
+        result[r.stage] = {
+          stage: r.stage as ProductionStage,
+          assignee: r.assignee || undefined,
+          dueDate: r.due_date || undefined,
+          completedAt: r.completed_at || undefined,
+        };
+      }
+    }
+    return result as Record<ProductionStage, StageAssignment>;
+  },
+
+  upsert(
+    orderId: string,
+    stage: ProductionStage,
+    data: { assignee?: string; dueDate?: string; completedAt?: string }
+  ): boolean {
+    const existing = db
+      .prepare('SELECT id FROM stage_assignments WHERE order_id = ? AND stage = ?')
+      .get(orderId, stage) as { id?: string } | undefined;
+    const now = new Date().toISOString();
+    if (existing?.id) {
+      const result = db
+        .prepare(
+          'UPDATE stage_assignments SET assignee = ?, due_date = ?, completed_at = COALESCE(?, completed_at) WHERE id = ?'
+        )
+        .run(
+          data.assignee ?? null,
+          data.dueDate ?? null,
+          data.completedAt ?? null,
+          existing.id
+        );
+      return result.changes > 0;
+    } else {
+      const id = uuidv4();
+      const result = db
+        .prepare(
+          'INSERT INTO stage_assignments (id, order_id, stage, assignee, due_date, completed_at) VALUES (?, ?, ?, ?, ?, ?)'
+        )
+        .run(
+          id,
+          orderId,
+          stage,
+          data.assignee ?? null,
+          data.dueDate ?? null,
+          data.completedAt ?? null
+        );
+      return result.changes > 0;
+    }
+  },
+
+  markCompleted(orderId: string, stage: ProductionStage): boolean {
+    const now = new Date().toISOString();
+    const result = db
+      .prepare(
+        'UPDATE stage_assignments SET completed_at = ? WHERE order_id = ? AND stage = ? AND completed_at IS NULL'
+      )
+      .run(now, orderId, stage);
+    return result.changes > 0;
+  },
+
+  listTodos(): AssigneeTodo[] {
+    const rows = db
+      .prepare(
+        `SELECT sa.*, o.order_no, o.customer_name, o.status
+         FROM stage_assignments sa
+         JOIN orders o ON o.id = sa.order_id
+         WHERE sa.completed_at IS NULL
+           AND sa.assignee IS NOT NULL
+           AND o.status IN ('retouching', 'layouting', 'producing')
+         ORDER BY COALESCE(sa.due_date, '9999') ASC`
+      )
+      .all() as any[];
+    return rows.map((r) => ({
+      assignee: r.assignee,
+      stage: r.stage as ProductionStage,
+      orderId: r.order_id,
+      orderNo: r.order_no,
+      customerName: r.customer_name,
+      dueDate: r.due_date || undefined,
+      overdue: r.due_date && new Date(r.due_date) < new Date(),
+      stageLabel: PRODUCTION_STAGE_LABELS[r.stage as ProductionStage] || r.stage,
+    }));
+  },
+};
+
+export const deliveryRepo = {
+  getItemsByOrderId(orderId: string): DeliveryItem[] {
+    const rows = db
+      .prepare('SELECT * FROM delivery_items WHERE order_id = ? ORDER BY uploaded_at DESC')
+      .all(orderId);
+    return rows.map(mapDeliveryItem);
+  },
+
+  getStatus(orderId: string): { status: DeliveryStatus; signedAt?: string; signer?: string } {
+    const row = db
+      .prepare('SELECT * FROM delivery_status WHERE order_id = ?')
+      .get(orderId) as any;
+    if (!row) return { status: 'pending' };
+    return {
+      status: row.status as DeliveryStatus,
+      signedAt: row.signed_at || undefined,
+      signer: row.signer || undefined,
+    };
+  },
+
+  addItem(
+    orderId: string,
+    type: DeliveryItemType,
+    filename: string,
+    uploadedBy: string,
+    note?: string
+  ): DeliveryItem {
+    const id = uuidv4();
+    const now = new Date().toISOString();
+    db.prepare(
+      'INSERT INTO delivery_items (id, order_id, type, filename, url, uploaded_by, uploaded_at, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(
+      id,
+      orderId,
+      type,
+      filename,
+      filename.startsWith('http') ? filename : `/api/uploads/${filename}`,
+      uploadedBy,
+      now,
+      note ?? null
+    );
+    activityLogRepo.create(
+      orderId,
+      'delivery_uploaded',
+      `上传交付资料：${filename}`,
+      uploadedBy,
+      { type, filename }
+    );
+    return {
+      id,
+      orderId,
+      type,
+      filename,
+      url: filename.startsWith('http') ? filename : `/api/uploads/${filename}`,
+      uploadedBy,
+      uploadedAt: now,
+      note,
+    };
+  },
+
+  removeItem(id: string): boolean {
+    const result = db.prepare('DELETE FROM delivery_items WHERE id = ?').run(id);
+    return result.changes > 0;
+  },
+
+  updateStatus(
+    orderId: string,
+    status: DeliveryStatus,
+    operator?: string,
+    signer?: string
+  ): boolean {
+    const now = new Date().toISOString();
+    const existing = db
+      .prepare('SELECT order_id FROM delivery_status WHERE order_id = ?')
+      .get(orderId);
+    let result: any;
+    if (existing) {
+      result = db
+        .prepare(
+          'UPDATE delivery_status SET status = ?, signed_at = ?, signer = ? WHERE order_id = ?'
+        )
+        .run(
+          status,
+          status === 'signed' ? now : null,
+          status === 'signed' ? signer ?? null : null,
+          orderId
+        );
+    } else {
+      result = db
+        .prepare(
+          'INSERT INTO delivery_status (order_id, status, signed_at, signer) VALUES (?, ?, ?, ?)'
+        )
+        .run(
+          orderId,
+          status,
+          status === 'signed' ? now : null,
+          status === 'signed' ? signer ?? null : null
+        );
+    }
+    if (result.changes > 0) {
+      const STATUS_LABELS: Record<DeliveryStatus, string> = {
+        pending: '待交付',
+        in_transit: '配送中',
+        delivered: '已送达',
+        signed: '已签收',
+      };
+      activityLogRepo.create(
+        orderId,
+        'delivery_receipt_updated',
+        `交付状态更新为「${STATUS_LABELS[status]}」${signer ? ` - 签收人：${signer}` : ''}`,
+        operator || '系统',
+        { status, signer }
+      );
+    }
+    return result.changes > 0;
   },
 };
 
@@ -191,7 +446,6 @@ export const orderRepo = {
       WHERE 1=1
     `;
     const params: any[] = [];
-
     if (filters?.status) {
       sql += ' AND o.status = ?';
       params.push(filters.status);
@@ -205,29 +459,40 @@ export const orderRepo = {
       const kw = `%${filters.keyword}%`;
       params.push(kw, kw, kw);
     }
-
     sql += ' ORDER BY o.created_at DESC';
-
     const rows = db.prepare(sql).all(...params);
     return rows.map((row: any) => {
       const photos = photoRepo.getByOrderId(row.id);
       const logs = statusLogRepo.getByOrderId(row.id);
-      return mapOrder(row, photos, logs);
+      const assignments = stageAssignmentRepo.getByOrderId(row.id);
+      const delStatus = deliveryRepo.getStatus(row.id);
+      const delItems = deliveryRepo.getItemsByOrderId(row.id);
+      return mapOrder(row, photos, logs, [], assignments, {
+        ...delStatus,
+        items: delItems,
+      });
     });
   },
 
   getById(id: string): Order | null {
-    const row = db.prepare(`
-      SELECT o.*, p.name as photographer_name
-      FROM orders o
-      LEFT JOIN photographers p ON o.photographer_id = p.id
-      WHERE o.id = ?
-    `).get(id) as any;
+    const row = db
+      .prepare(
+        `SELECT o.*, p.name as photographer_name
+         FROM orders o LEFT JOIN photographers p ON o.photographer_id = p.id
+         WHERE o.id = ?`
+      )
+      .get(id) as any;
     if (!row) return null;
     const photos = photoRepo.getByOrderId(row.id);
     const logs = statusLogRepo.getByOrderId(row.id);
     const activities = activityLogRepo.getByOrderId(row.id);
-    const order = mapOrder(row, photos, logs, activities);
+    const assignments = stageAssignmentRepo.getByOrderId(row.id);
+    const delStatus = deliveryRepo.getStatus(row.id);
+    const delItems = deliveryRepo.getItemsByOrderId(row.id);
+    const order = mapOrder(row, photos, logs, activities, assignments, {
+      ...delStatus,
+      items: delItems,
+    });
     const sendLogs = linkSendLogRepo.getByOrderId(row.id);
     return {
       ...order,
@@ -237,16 +502,22 @@ export const orderRepo = {
   },
 
   getByToken(token: string): Order | null {
-    const row = db.prepare(`
-      SELECT o.*, p.name as photographer_name
-      FROM orders o
-      LEFT JOIN photographers p ON o.photographer_id = p.id
-      WHERE o.selection_token = ?
-    `).get(token) as any;
+    const row = db
+      .prepare(
+        `SELECT o.*, p.name as photographer_name
+         FROM orders o LEFT JOIN photographers p ON o.photographer_id = p.id
+         WHERE o.selection_token = ?`
+      )
+      .get(token) as any;
     if (!row) return null;
     const photos = photoRepo.getByOrderId(row.id);
     const logs = statusLogRepo.getByOrderId(row.id);
-    return mapOrder(row, photos, logs);
+    const delStatus = deliveryRepo.getStatus(row.id);
+    const delItems = deliveryRepo.getItemsByOrderId(row.id);
+    return mapOrder(row, photos, logs, [], undefined, {
+      ...delStatus,
+      items: delItems,
+    });
   },
 
   create(data: {
@@ -259,7 +530,9 @@ export const orderRepo = {
     retouchCount: number;
   }): Order {
     const id = uuidv4();
-    const orderNo = `HS${new Date().toISOString().slice(0, 10).replace(/-/g, '')}${String(Math.floor(Math.random() * 900) + 100)}`;
+    const orderNo = `HS${new Date().toISOString().slice(0, 10).replace(/-/g, '')}${String(
+      Math.floor(Math.random() * 900) + 100
+    )}`;
     const token = `sel-${uuidv4().slice(0, 8)}`;
     const now = new Date().toISOString();
     const expiresAt = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString();
@@ -272,14 +545,26 @@ export const orderRepo = {
         created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      id, orderNo, data.customerName, data.customerPhone, data.photographerId,
-      data.shootDate, data.packageName, data.albumCount, data.retouchCount,
-      'pending_selection', token, now, expiresAt, now, now
+      id,
+      orderNo,
+      data.customerName,
+      data.customerPhone,
+      data.photographerId,
+      data.shootDate,
+      data.packageName,
+      data.albumCount,
+      data.retouchCount,
+      'pending_selection',
+      token,
+      now,
+      expiresAt,
+      now,
+      now
     );
-
     statusLogRepo.create(id, 'pending_selection', '系统', '订单创建');
-    activityLogRepo.create(id, 'status_change', '订单创建，状态变更为「待选片」', '系统', { to: '待选片' });
-
+    activityLogRepo.create(id, 'status_change', '订单创建，状态变更为「待选片」', '系统', {
+      to: '待选片',
+    });
     return this.getById(id)!;
   },
 
@@ -305,15 +590,47 @@ export const orderRepo = {
         operator,
         { to: labelMap[status], remark }
       );
+      const PREV_STAGE: Partial<Record<OrderStatus, ProductionStage>> = {
+        layouting: 'retouching',
+        producing: 'layouting',
+        shipping: 'producing',
+      };
+      if (status in PREV_STAGE && PREV_STAGE[status as OrderStatus]) {
+        stageAssignmentRepo.markCompleted(id, PREV_STAGE[status as OrderStatus]!);
+      }
+      if (status === 'shipping') {
+        deliveryRepo.updateStatus(id, 'in_transit', operator);
+      }
+      if (status === 'completed') {
+        deliveryRepo.updateStatus(id, 'delivered', operator);
+      }
+    }
+    return result.changes > 0;
+  },
+
+  updateRemark(id: string, remark: string, operator?: string): boolean {
+    const now = new Date().toISOString();
+    const cleaned = remark.trim();
+    const result = db
+      .prepare('UPDATE orders SET remark = ?, updated_at = ? WHERE id = ?')
+      .run(cleaned || null, now, id);
+    if (result.changes > 0) {
+      activityLogRepo.create(
+        id,
+        'remark_updated',
+        cleaned ? `更新备注：${cleaned}` : '清空订单备注',
+        operator || '系统',
+        { remark: cleaned }
+      );
     }
     return result.changes > 0;
   },
 
   updateShipping(id: string, company: string, trackingNo: string): boolean {
     const now = new Date().toISOString();
-    const result = db.prepare(
-      'UPDATE orders SET shipping_company = ?, shipping_tracking_no = ?, updated_at = ? WHERE id = ?'
-    ).run(company, trackingNo, now, id);
+    const result = db
+      .prepare('UPDATE orders SET shipping_company = ?, shipping_tracking_no = ?, updated_at = ? WHERE id = ?')
+      .run(company, trackingNo, now, id);
     if (result.changes > 0) {
       activityLogRepo.create(
         id,
@@ -328,29 +645,25 @@ export const orderRepo = {
 
   updateSatisfaction(id: string, score: number): boolean {
     const now = new Date().toISOString();
-    const result = db.prepare(
-      'UPDATE orders SET satisfaction = ?, updated_at = ? WHERE id = ?'
-    ).run(score, now, id);
+    const result = db.prepare('UPDATE orders SET satisfaction = ?, updated_at = ? WHERE id = ?').run(score, now, id);
     if (result.changes > 0) {
-      activityLogRepo.create(
-        id,
-        'satisfaction_updated',
-        `客户满意度评分：${score}星`,
-        '系统',
-        { satisfaction: score }
-      );
+      activityLogRepo.create(id, 'satisfaction_updated', `客户满意度评分：${score}星`, '系统', {
+        satisfaction: score,
+      });
     }
     return result.changes > 0;
   },
 
-  updateSelectionLinkSent(id: string, sent: boolean): boolean {
+  updateSelectionLinkSent(id: string, sent: boolean, method: string = '微信', operator: string = '客服'): boolean {
     const now = new Date().toISOString();
-    const result = db.prepare(
-      'UPDATE orders SET selection_link_sent = ?, updated_at = ? WHERE id = ?'
-    ).run(sent ? 1 : 0, now, id);
+    const result = db
+      .prepare('UPDATE orders SET selection_link_sent = ?, updated_at = ? WHERE id = ?')
+      .run(sent ? 1 : 0, now, id);
     if (result.changes > 0 && sent) {
-      linkSendLogRepo.create(id, '微信', '客服');
-      activityLogRepo.create(id, 'link_sent', '选片链接已发送给客户', '客服', { method: '微信' });
+      linkSendLogRepo.create(id, method, operator);
+      activityLogRepo.create(id, 'link_sent', `选片链接已通过${method}发送给客户`, operator, {
+        method,
+      });
     }
     return result.changes > 0;
   },
@@ -382,45 +695,44 @@ export const statsRepo = {
     let dateFilter = '';
     let satDateFilter = '';
     const params: any[] = [];
-
     if (month) {
       dateFilter = " AND strftime('%Y-%m', o.created_at) = ?";
       satDateFilter = " AND strftime('%Y-%m', created_at) = ?";
       params.push(month);
     }
-
     const photographers = photographerRepo.listAll();
-
-    return photographers.map((p) => {
-      const orderRow = db.prepare(`
-        SELECT
-          COUNT(DISTINCT o.id) as order_count,
-          COALESCE(SUM(CASE WHEN ph.mark = 'album' THEN 1 ELSE 0 END), 0) as total_photos,
-          COALESCE(SUM(CASE WHEN ph.mark = 'retouch' THEN 1 ELSE 0 END), 0) as retouch_photos
-        FROM orders o
-        LEFT JOIN photos ph ON ph.order_id = o.id
-        WHERE o.photographer_id = ? ${dateFilter}
-      `).get(p.id, ...params) as any;
-
-      let satParams: any[] = [p.id];
-      if (month) satParams.push(month);
-      const satRow = db.prepare(`
-        SELECT
-          AVG(satisfaction) as avg_sat,
-          COUNT(*) as rated_count
-        FROM orders
-        WHERE photographer_id = ? AND status = 'completed' AND satisfaction IS NOT NULL ${satDateFilter}
-      `).get(...satParams) as any;
-
-      return {
-        photographerId: p.id,
-        photographerName: p.name,
-        totalPhotos: orderRow?.total_photos ?? 0,
-        retouchPhotos: orderRow?.retouch_photos ?? 0,
-        avgSatisfaction: Math.round((satRow?.avg_sat ?? 0) * 10) / 10,
-        orderCount: orderRow?.order_count ?? 0,
-        ratedOrderCount: satRow?.rated_count ?? 0,
-      };
-    }).sort((a, b) => b.totalPhotos - a.totalPhotos);
+    return photographers
+      .map((p) => {
+        const orderRow = db
+          .prepare(
+            `SELECT
+              COUNT(DISTINCT o.id) as order_count,
+              COALESCE(SUM(CASE WHEN ph.mark = 'album' THEN 1 ELSE 0 END), 0) as total_photos,
+              COALESCE(SUM(CASE WHEN ph.mark = 'retouch' THEN 1 ELSE 0 END), 0) as retouch_photos
+            FROM orders o
+            LEFT JOIN photos ph ON ph.order_id = o.id
+            WHERE o.photographer_id = ? ${dateFilter}`
+          )
+          .get(p.id, ...params) as any;
+        let satParams: any[] = [p.id];
+        if (month) satParams.push(month);
+        const satRow = db
+          .prepare(
+            `SELECT AVG(satisfaction) as avg_sat, COUNT(*) as rated_count
+             FROM orders
+             WHERE photographer_id = ? AND status = 'completed' AND satisfaction IS NOT NULL ${satDateFilter}`
+          )
+          .get(...satParams) as any;
+        return {
+          photographerId: p.id,
+          photographerName: p.name,
+          totalPhotos: orderRow?.total_photos ?? 0,
+          retouchPhotos: orderRow?.retouch_photos ?? 0,
+          avgSatisfaction: Math.round((satRow?.avg_sat ?? 0) * 10) / 10,
+          orderCount: orderRow?.order_count ?? 0,
+          ratedOrderCount: satRow?.rated_count ?? 0,
+        };
+      })
+      .sort((a, b) => b.totalPhotos - a.totalPhotos);
   },
 };
