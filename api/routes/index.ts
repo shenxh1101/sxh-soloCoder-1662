@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { orderRepo, photoRepo, photographerRepo, statsRepo } from '../repositories/index.ts';
+import { orderRepo, photoRepo, photographerRepo, statsRepo, activityLogRepo, linkSendLogRepo } from '../repositories/index.ts';
 import type { OrderStatus, PhotoMark } from '../../shared/types';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -110,12 +110,21 @@ router.get('/orders/:id/selection-link', (req: Request, res: Response) => {
 router.get('/selection/:token', (req: Request, res: Response) => {
   const order = orderRepo.getByToken(req.params.token);
   if (!order) return res.status(404).json({ error: '选片链接无效' });
+  if (orderRepo.isLinkExpired(order.selectionLinkExpiresAt)) {
+    return res.status(410).json({ error: '选片链接已过期', expired: true, expiresAt: order.selectionLinkExpiresAt });
+  }
   res.json(order);
 });
 
 router.post('/selection/:token', (req: Request, res: Response) => {
   const order = orderRepo.getByToken(req.params.token);
   if (!order) return res.status(404).json({ error: '选片链接无效' });
+  if (orderRepo.isLinkExpired(order.selectionLinkExpiresAt)) {
+    return res.status(410).json({ error: '选片链接已过期', expired: true, expiresAt: order.selectionLinkExpiresAt });
+  }
+  if (order.status === 'selected') {
+    return res.status(400).json({ error: '选片已提交，无法重复提交' });
+  }
 
   const { selections }: { selections: { id: string; mark: PhotoMark; remark?: string }[] } = req.body;
   if (!Array.isArray(selections)) {
@@ -126,7 +135,17 @@ router.post('/selection/:token', (req: Request, res: Response) => {
     photoRepo.updateMark(sel.id, sel.mark, sel.remark ?? null);
   }
 
-  orderRepo.updateStatus(order.id, 'selected', '客户');
+  const albumCount = selections.filter((s) => s.mark === 'album').length;
+  const retouchCount = selections.filter((s) => s.mark === 'retouch').length;
+  orderRepo.updateStatus(order.id, 'selected', '客户', `客户完成选片：入册${albumCount}张，精修${retouchCount}张`);
+  activityLogRepo.create(
+    order.id,
+    'selection_submitted',
+    `客户完成选片：入册${albumCount}张，精修${retouchCount}张`,
+    '客户',
+    { albumCount, retouchCount }
+  );
+
   const updated = orderRepo.getById(order.id);
   res.json(updated);
 });
@@ -150,11 +169,29 @@ router.patch('/orders/:id/status', (req: Request, res: Response) => {
 });
 
 router.patch('/orders/:id/selection-link-sent', (req: Request, res: Response) => {
-  const { sent } = req.body;
+  const { sent, method } = req.body;
   const order = orderRepo.getById(req.params.id);
   if (!order) return res.status(404).json({ error: '订单不存在' });
   orderRepo.updateSelectionLinkSent(req.params.id, !!sent);
   res.json(orderRepo.getById(req.params.id));
+});
+
+router.post('/orders/:id/regenerate-selection-link', (req: Request, res: Response) => {
+  const order = orderRepo.regenerateSelectionLink(req.params.id);
+  if (!order) return res.status(404).json({ error: '订单不存在' });
+  res.json(order);
+});
+
+router.get('/orders/:id/link-send-logs', (req: Request, res: Response) => {
+  const order = orderRepo.getById(req.params.id);
+  if (!order) return res.status(404).json({ error: '订单不存在' });
+  res.json(linkSendLogRepo.getByOrderId(req.params.id));
+});
+
+router.get('/orders/:id/activities', (req: Request, res: Response) => {
+  const order = orderRepo.getById(req.params.id);
+  if (!order) return res.status(404).json({ error: '订单不存在' });
+  res.json(activityLogRepo.getByOrderId(req.params.id));
 });
 
 router.get('/query', (req: Request, res: Response) => {

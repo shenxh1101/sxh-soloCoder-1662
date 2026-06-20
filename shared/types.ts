@@ -10,6 +10,15 @@ export type OrderStatus =
 
 export type PhotoMark = 'album' | 'retouch' | 'none';
 
+export type ActivityType =
+  | 'status_change'
+  | 'link_sent'
+  | 'link_regenerated'
+  | 'selection_submitted'
+  | 'shipping_updated'
+  | 'satisfaction_updated'
+  | 'remark_updated';
+
 export interface Photographer {
   id: string;
   name: string;
@@ -43,6 +52,22 @@ export interface StatusLog {
   remark?: string;
 }
 
+export interface ActivityLog {
+  id: string;
+  type: ActivityType;
+  timestamp: string;
+  operator?: string;
+  content?: string;
+  detail?: any;
+}
+
+export interface LinkSendLog {
+  id: string;
+  sentAt: string;
+  method: string;
+  operator?: string;
+}
+
 export interface ShippingInfo {
   company: string;
   trackingNo: string;
@@ -58,11 +83,16 @@ export interface Order {
   packageInfo: PackageInfo;
   status: OrderStatus;
   selectionToken: string;
+  selectionLinkSent?: boolean;
+  selectionLinkCreatedAt?: string;
+  selectionLinkExpiresAt?: string;
+  linkSendCount?: number;
+  lastLinkSentAt?: string;
   photos: Photo[];
   statusHistory: StatusLog[];
+  activities?: ActivityLog[];
   shipping?: ShippingInfo;
   satisfaction?: number;
-  selectionLinkSent?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -74,6 +104,7 @@ export interface PhotographerStats {
   retouchPhotos: number;
   avgSatisfaction: number;
   orderCount: number;
+  ratedOrderCount: number;
 }
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {

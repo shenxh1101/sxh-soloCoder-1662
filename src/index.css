@@ -125,3 +125,37 @@ body {
   0% { opacity: 0; transform: translateY(8px); }
   100% { opacity: 1; transform: translateY(0); }
 }
+
+@media print {
+  @page {
+    size: A4;
+    margin: 20mm;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  .selection-slip,
+  .selection-slip * {
+    visibility: visible;
+  }
+
+  .selection-slip .no-print {
+    display: none !important;
+  }
+
+  .selection-slip {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: none;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .selection-slip.print-only {
+    display: block;
+  }
+}

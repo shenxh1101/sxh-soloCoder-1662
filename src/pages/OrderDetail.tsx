@@ -27,6 +27,13 @@ import {
   Send,
   Check,
   Pencil,
+  Printer,
+  RefreshCw,
+  History,
+  Heart,
+  Zap,
+  FileText,
+  AlertTriangle,
 } from 'lucide-react';
 import { api } from '@/api/client';
 import {
@@ -36,11 +43,13 @@ import {
   type Order,
   type OrderStatus,
   type PhotoMark,
+  type ActivityLog,
 } from '@shared/types';
 import { cn } from '@/lib/utils';
 import Layout from '@/components/Layout';
 import StatusBadge from '@/components/StatusBadge';
 import ProgressTimeline from '@/components/ProgressTimeline';
+import SelectionSlip from '@/components/SelectionSlip';
 
 function getStatusBadgeClass(status: OrderStatus) {
   const map: Record<OrderStatus, string> = {
@@ -62,12 +71,6 @@ function getMarkBadgeClass(mark: PhotoMark | null) {
   return 'bg-ink-warm/10 text-ink-warm border-ink-warm/20';
 }
 
-function getMarkIcon(mark: PhotoMark | null) {
-  if (mark === 'album') return <Album className="w-3 h-3" />;
-  if (mark === 'retouch') return <Wand2 className="w-3 h-3" />;
-  return <Ban className="w-3 h-3" />;
-}
-
 const STATUS_FLOW_ICONS: Record<OrderStatus, React.ReactNode> = {
   pending_selection: <ImageIcon className="w-4 h-4" />,
   selecting: <ImageIcon className="w-4 h-4" />,
@@ -77,6 +80,26 @@ const STATUS_FLOW_ICONS: Record<OrderStatus, React.ReactNode> = {
   producing: <Package className="w-4 h-4" />,
   shipping: <Truck className="w-4 h-4" />,
   completed: <CheckCircle2 className="w-4 h-4" />,
+};
+
+const ACTIVITY_ICONS: Record<string, React.ReactNode> = {
+  status_change: <Zap className="w-4 h-4" />,
+  link_sent: <Send className="w-4 h-4" />,
+  link_regenerated: <RefreshCw className="w-4 h-4" />,
+  selection_submitted: <Heart className="w-4 h-4" />,
+  shipping_updated: <Truck className="w-4 h-4" />,
+  satisfaction_updated: <Star className="w-4 h-4" />,
+  remark_updated: <Pencil className="w-4 h-4" />,
+};
+
+const ACTIVITY_COLORS: Record<string, string> = {
+  status_change: 'from-champagne-400 to-champagne-600',
+  link_sent: 'from-blue-400 to-blue-600',
+  link_regenerated: 'from-purple-400 to-purple-600',
+  selection_submitted: 'from-rose-400 to-rose-600',
+  shipping_updated: 'from-cyan-400 to-cyan-600',
+  satisfaction_updated: 'from-amber-400 to-amber-600',
+  remark_updated: 'from-emerald-400 to-emerald-600',
 };
 
 const NEXT_STATUS: Record<OrderStatus, OrderStatus | null> = {
@@ -89,6 +112,17 @@ const NEXT_STATUS: Record<OrderStatus, OrderStatus | null> = {
   shipping: 'completed',
   completed: null,
 };
+
+function isLinkExpired(expiresAt: string | undefined): boolean {
+  if (!expiresAt) return false;
+  return new Date() > new Date(expiresAt);
+}
+
+function daysUntilExpire(expiresAt: string | undefined): number {
+  if (!expiresAt) return 0;
+  const diff = new Date(expiresAt).getTime() - Date.now();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
 
 export default function OrderDetail() {
   const { id } = useParams<{ id: string }>();
@@ -103,22 +137,33 @@ export default function OrderDetail() {
   const [satisfaction, setSatisfaction] = useState(5);
   const [copied, setCopied] = useState(false);
   const [linkSentUpdating, setLinkSentUpdating] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [activities, setActivities] = useState<ActivityLog[]>([]);
 
   const refreshOrder = async () => {
     if (!id) return;
     const data = await api.getOrder(id);
     setOrder(data);
+    if (data.activities) {
+      setActivities(data.activities);
+    }
   };
 
   useEffect(() => {
     if (!id) return;
-    api.getOrder(id).then((data) => {
-      setOrder(data);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    setLoading(true);
+    Promise.all([api.getOrder(id)])
+      .then(([orderData]) => {
+        setOrder(orderData);
+        if (orderData.activities) setActivities(orderData.activities);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }, [id]);
 
-  const selectionLink = order ? `${window.location.origin}${window.location.pathname}#/select/${order.selectionToken}` : '';
+  const selectionLink = order
+    ? `${window.location.origin}${window.location.pathname}#/select/${order.selectionToken}`
+    : '';
 
   const handleCopyLink = async () => {
     try {
@@ -141,12 +186,28 @@ export default function OrderDetail() {
     if (!order) return;
     setLinkSentUpdating(true);
     try {
-      const updated = await api.markSelectionLinkSent(order.id, !order.selectionLinkSent);
+      const updated = await api.markSelectionLinkSent(order.id, !order.selectionLinkSent, '微信');
       setOrder(updated);
+      if (updated.activities) setActivities(updated.activities);
     } catch (err) {
       alert(err instanceof Error ? err.message : '操作失败');
     } finally {
       setLinkSentUpdating(false);
+    }
+  };
+
+  const handleRegenerateLink = async () => {
+    if (!order) return;
+    if (!confirm('确定要重新生成选片链接吗？原链接将失效。')) return;
+    setRegenerating(true);
+    try {
+      const updated = await api.regenerateSelectionLink(order.id);
+      setOrder(updated);
+      if (updated.activities) setActivities(updated.activities);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '操作失败');
+    } finally {
+      setRegenerating(false);
     }
   };
 
@@ -185,6 +246,7 @@ export default function OrderDetail() {
       }
       const updated = await api.updateOrderStatus(order.id, payload);
       setOrder(updated);
+      if (updated.activities) setActivities(updated.activities);
       setShowAdvanceModal(false);
     } catch (err) {
       alert(err instanceof Error ? err.message : '更新失败');
@@ -217,13 +279,10 @@ export default function OrderDetail() {
     );
   }
 
-  const albumPhotos = order.photos.filter((p) => p.mark === 'album');
-  const retouchPhotos = order.photos.filter((p) => p.mark === 'retouch');
-  const nonePhotos = order.photos.filter((p) => p.mark === 'none' || p.mark === null);
-  const remarks = order.photos.filter((p) => p.remark);
-
   const currentStatusIndex = PRODUCTION_STATUSES.indexOf(order.status);
   const nextStatus = NEXT_STATUS[order.status];
+  const linkExpired = isLinkExpired(order.selectionLinkExpiresAt);
+  const daysLeft = daysUntilExpire(order.selectionLinkExpiresAt);
 
   return (
     <Layout>
@@ -243,12 +302,24 @@ export default function OrderDetail() {
           </div>
           <p className="text-sm text-ink-warm mt-0.5">订单号：{order.orderNo}</p>
         </div>
-        {nextStatus && (
-          <button onClick={handleOpenAdvanceModal} className="btn-primary flex items-center gap-2" disabled={updating}>
-            <ChevronRight className="w-4.5 h-4.5" />
-            进入下一阶段
-          </button>
-        )}
+        <div className="flex gap-2">
+          {order.status === 'selected' || currentStatusIndex >= 0 ? (
+            <button
+              onClick={() => window.print()}
+              className="btn-secondary flex items-center gap-2"
+              title="打印选片确认单"
+            >
+              <Printer className="w-4 h-4" />
+              打印确认单
+            </button>
+          ) : null}
+          {nextStatus && (
+            <button onClick={handleOpenAdvanceModal} className="btn-primary flex items-center gap-2" disabled={updating}>
+              <ChevronRight className="w-4.5 h-4.5" />
+              进入下一阶段
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -338,27 +409,62 @@ export default function OrderDetail() {
               )}
             </div>
             <div className="gold-divider mb-4" />
+
+            <div className="space-y-3 mb-4">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-ink-warm">生成时间</span>
+                <span className="text-ink-charcoal">
+                  {order.selectionLinkCreatedAt
+                    ? new Date(order.selectionLinkCreatedAt).toLocaleDateString('zh-CN')
+                    : '-'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-ink-warm">有效期至</span>
+                <span className={cn(
+                  'font-medium',
+                  linkExpired ? 'text-red-600' : 'text-ink-charcoal'
+                )}>
+                  {order.selectionLinkExpiresAt
+                    ? `${new Date(order.selectionLinkExpiresAt).toLocaleDateString('zh-CN')} ${linkExpired ? '（已过期）' : `（剩 ${daysLeft} 天）`}`
+                    : '-'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-ink-warm">发送次数</span>
+                <span className="text-ink-charcoal font-medium">{order.linkSendCount || 0} 次</span>
+              </div>
+              {order.lastLinkSentAt && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-ink-warm">最近发送</span>
+                  <span className="text-ink-charcoal">
+                    {new Date(order.lastLinkSentAt).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              )}
+            </div>
+
             <div className="p-3 rounded-lg bg-ivory/80 border border-champagne-100 mb-4">
               <p className="text-sm text-ink-charcoal break-all font-mono leading-relaxed">{selectionLink}</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <button
                 onClick={handleCopyLink}
                 className={cn(
-                  'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all',
+                  'flex-1 min-w-[80px] flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all',
                   copied
                     ? 'bg-green-50 text-green-700 border border-green-200'
                     : 'bg-champagne-50 text-champagne-700 border border-champagne-200 hover:bg-champagne-100'
                 )}
               >
                 {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                {copied ? '已复制' : '复制链接'}
+                {copied ? '已复制' : '复制'}
               </button>
               <a
                 href={`#/select/${order.selectionToken}`}
                 target="_blank"
                 rel="noreferrer"
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-all"
+                className="flex-1 min-w-[80px] flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-all"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
                 预览
@@ -367,7 +473,7 @@ export default function OrderDetail() {
                 onClick={handleMarkLinkSent}
                 disabled={linkSentUpdating}
                 className={cn(
-                  'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all',
+                  'flex-1 min-w-[80px] flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all',
                   order.selectionLinkSent
                     ? 'bg-green-50 text-green-700 border border-green-200'
                     : 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
@@ -377,6 +483,14 @@ export default function OrderDetail() {
                 {order.selectionLinkSent ? '已发送' : '标记已发'}
               </button>
             </div>
+            <button
+              onClick={handleRegenerateLink}
+              disabled={regenerating}
+              className="w-full mt-3 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm text-ink-warm border border-dashed border-champagne-200 hover:bg-champagne-50 hover:text-champagne-700 transition-all"
+            >
+              {regenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+              重新生成链接
+            </button>
           </div>
 
           {order.shipping && (
@@ -487,67 +601,56 @@ export default function OrderDetail() {
             </div>
           </div>
 
+          {order.status === 'selected' || currentStatusIndex >= 0 ? (
+            <div className="card-gold p-5">
+              <div className="flex items-center gap-2.5 mb-5">
+                <Sparkles className="w-4.5 h-4.5 text-champagne-500" />
+                <h3 className="font-display text-lg font-semibold text-ink-charcoal">选片确认单</h3>
+              </div>
+              <div className="gold-divider mb-5" />
+              <SelectionSlip order={order} showPrint />
+            </div>
+          ) : null}
+
           <div className="card-gold p-5">
             <div className="flex items-center gap-2.5 mb-5">
-              <Sparkles className="w-4.5 h-4.5 text-champagne-500" />
-              <h3 className="font-display text-lg font-semibold text-ink-charcoal">选片确认单</h3>
+              <History className="w-4.5 h-4.5 text-champagne-500" />
+              <h3 className="font-display text-lg font-semibold text-ink-charcoal">操作日志</h3>
             </div>
             <div className="gold-divider mb-5" />
 
-            <div className="grid grid-cols-3 gap-4 mb-5">
-              <div className="p-4 rounded-xl bg-gradient-to-br from-champagne-50 to-champagne-100/50 text-center">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Album className="w-4 h-4 text-champagne-600" />
-                  <span className="text-xs text-champagne-700">入册</span>
-                </div>
-                <div className="font-display text-2xl font-semibold text-champagne-700">
-                  {albumPhotos.length}
-                </div>
+            {activities.length === 0 ? (
+              <div className="py-10 text-center">
+                <History className="w-10 h-10 mx-auto mb-2 opacity-20 text-champagne-500" />
+                <p className="text-sm text-ink-warm">暂无操作记录</p>
               </div>
-              <div className="p-4 rounded-xl bg-gradient-to-br from-indigo-50 to-indigo-100/50 text-center">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Wand2 className="w-4 h-4 text-indigo-600" />
-                  <span className="text-xs text-indigo-700">精修</span>
-                </div>
-                <div className="font-display text-2xl font-semibold text-indigo-700">
-                  {retouchPhotos.length}
-                </div>
-              </div>
-              <div className="p-4 rounded-xl bg-gradient-to-br from-ink-warm/5 to-ink-warm/10 text-center">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Ban className="w-4 h-4 text-ink-warm" />
-                  <span className="text-xs text-ink-warm">不选</span>
-                </div>
-                <div className="font-display text-2xl font-semibold text-ink-warm">
-                  {nonePhotos.length}
-                </div>
-              </div>
-            </div>
-
-            {remarks.length > 0 && (
-              <>
-                <div className="gold-divider mb-4" />
-                <div className="flex items-center gap-2 mb-3">
-                  <MessageSquare className="w-4 h-4 text-champagne-500" />
-                  <span className="text-sm font-medium text-ink-charcoal">精修备注汇总</span>
-                </div>
-                <div className="space-y-2 max-h-48 overflow-auto scrollbar-thin pr-2">
-                  {remarks.map((p) => (
-                    <div key={p.id} className="p-3 rounded-lg bg-cream/50">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Tag className="w-3.5 h-3.5 text-champagne-500" />
-                        <span className="text-xs font-medium text-ink-charcoal">{p.filename}</span>
-                        {p.mark && (
-                          <span className={cn('badge border text-[10px]', getMarkBadgeClass(p.mark))}>
-                            {PHOTO_MARK_LABELS[p.mark]}
-                          </span>
+            ) : (
+              <div className="relative">
+                <div className="absolute left-[17px] top-2 bottom-2 w-0.5 bg-gradient-to-b from-champagne-200 to-cream" />
+                <div className="space-y-4">
+                  {activities.slice(0, 20).map((act) => (
+                    <div key={act.id} className="relative flex gap-3">
+                      <div
+                        className={cn(
+                          'relative z-10 w-9 h-9 rounded-lg bg-gradient-to-br text-white flex items-center justify-center shrink-0 shadow-soft',
+                          ACTIVITY_COLORS[act.type] || 'from-champagne-400 to-champagne-600'
                         )}
+                      >
+                        {ACTIVITY_ICONS[act.type] || <FileText className="w-4 h-4" />}
                       </div>
-                      <p className="text-sm text-ink-warm pl-5.5">{p.remark}</p>
+                      <div className="flex-1 pt-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium text-ink-charcoal">{act.content}</span>
+                        </div>
+                        <div className="text-xs text-ink-warm mt-0.5">
+                          {new Date(act.timestamp).toLocaleString('zh-CN')}
+                          {act.operator && <span className="ml-2">· {act.operator}</span>}
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
-              </>
+              </div>
             )}
           </div>
 
@@ -575,10 +678,9 @@ export default function OrderDetail() {
                       alt={photo.filename}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
-                    <div className="absolute top-2 left-2 flex gap-1.5">
+                    <div className="absolute top-2 left-2 flex gap-1.5 flex-wrap">
                       {photo.mark && (
                         <span className={cn('badge border backdrop-blur-sm bg-white/90', getMarkBadgeClass(photo.mark))}>
-                          {getMarkIcon(photo.mark)}
                           {PHOTO_MARK_LABELS[photo.mark]}
                         </span>
                       )}
@@ -588,11 +690,6 @@ export default function OrderDetail() {
                         <p className="text-xs text-white line-clamp-2">{photo.remark}</p>
                       </div>
                     )}
-                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <div className="bg-black/60 backdrop-blur-sm rounded-lg px-2 py-1 text-[10px] text-white truncate max-w-[120px]">
-                        {photo.filename}
-                      </div>
-                    </div>
                   </div>
                 ))}
               </div>

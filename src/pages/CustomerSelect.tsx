@@ -19,10 +19,14 @@ import {
   Ban,
   MessageSquare,
   Tag,
+  Clock,
+  Printer,
+  FileText,
 } from 'lucide-react';
 import { api } from '@/api/client';
 import type { Order, Photo, PhotoMark } from '@shared/types';
 import { PHOTO_MARK_LABELS } from '@shared/types';
+import SelectionSlip from '@/components/SelectionSlip';
 
 type SelectionMap = Record<string, { mark: PhotoMark; remark: string }>;
 
@@ -32,6 +36,8 @@ export default function CustomerSelect() {
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [linkExpired, setLinkExpired] = useState(false);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [selections, setSelections] = useState<SelectionMap>({});
   const [previewPhoto, setPreviewPhoto] = useState<Photo | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -57,7 +63,19 @@ export default function CustomerSelect() {
           setSubmitted(true);
         }
       })
-      .catch((e) => setError(e.message))
+      .catch(async (e) => {
+        if (e.message === '选片链接已过期') {
+          setLinkExpired(true);
+          try {
+            const res = await fetch(`/api/selection/${token}`);
+            if (res.status === 410) {
+              const data = await res.json();
+              setExpiresAt(data.expiresAt || null);
+            }
+          } catch {}
+        }
+        setError(e.message);
+      })
       .finally(() => setLoading(false));
   }, [token]);
 
@@ -117,6 +135,27 @@ export default function CustomerSelect() {
   }
 
   if (error || !order) {
+    if (linkExpired) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-ivory p-8">
+          <div className="card-gold p-8 text-center max-w-md">
+            <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
+              <Clock className="w-8 h-8 text-amber-500" />
+            </div>
+            <h2 className="font-display text-xl text-ink-charcoal mb-2">选片链接已过期</h2>
+            <p className="text-ink-warm text-sm mb-2">
+              此选片链接已失效，请联系客服获取新的选片链接。
+            </p>
+            {expiresAt && (
+              <p className="text-xs text-ink-warm/70">
+                有效期至：{new Date(expiresAt).toLocaleDateString('zh-CN')}
+              </p>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen flex items-center justify-center bg-ivory p-8">
         <div className="card-gold p-8 text-center max-w-md">
@@ -170,71 +209,33 @@ export default function CustomerSelect() {
       </div>
 
       {submitted && (
-        <div className="max-w-7xl mx-auto px-6 pb-2">
+        <div className="max-w-4xl mx-auto px-6 pb-2 pt-6">
           <div className="card-gold p-6">
-            <div className="flex items-center gap-3 mb-5">
-              <CheckCircle2 className="w-6 h-6 text-champagne-600" />
-              <div>
-                <h3 className="font-display text-lg font-semibold text-ink-charcoal">选片已确认提交</h3>
-                <p className="text-sm text-ink-warm">您的选片结果已发送至工作室，我们将尽快开始精修制作</p>
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="w-6 h-6 text-champagne-600" />
+                <div>
+                  <h3 className="font-display text-lg font-semibold text-ink-charcoal">选片已确认提交</h3>
+                  <p className="text-sm text-ink-warm">您的选片结果已发送至工作室，我们将尽快开始精修制作</p>
+                </div>
               </div>
+              <button
+                onClick={() => window.print()}
+                className="btn-secondary flex items-center gap-2 text-sm py-2"
+              >
+                <Printer className="w-4 h-4" />
+                打印确认单
+              </button>
             </div>
             <div className="gold-divider mb-5" />
-            <div className="grid grid-cols-3 gap-4 mb-5">
-              <div className="p-4 rounded-xl bg-gradient-to-br from-champagne-50 to-champagne-100/50 text-center">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Album className="w-4 h-4 text-champagne-600" />
-                  <span className="text-xs text-champagne-700">入册</span>
-                </div>
-                <div className="font-display text-2xl font-semibold text-champagne-700">{stats.album}</div>
-              </div>
-              <div className="p-4 rounded-xl bg-gradient-to-br from-rose-50 to-rose-100/50 text-center">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Wand2 className="w-4 h-4 text-rose-500" />
-                  <span className="text-xs text-rose-600">精修</span>
-                </div>
-                <div className="font-display text-2xl font-semibold text-rose-600">{stats.retouch}</div>
-              </div>
-              <div className="p-4 rounded-xl bg-gradient-to-br from-gray-50 to-gray-100/50 text-center">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  <Ban className="w-4 h-4 text-gray-500" />
-                  <span className="text-xs text-gray-600">不选</span>
-                </div>
-                <div className="font-display text-2xl font-semibold text-gray-600">{stats.none}</div>
-              </div>
-            </div>
-            {(() => {
-              const remarkPhotos = order.photos.filter((p) => {
-                const sel = selections[p.id];
-                return sel?.remark;
-              });
-              if (remarkPhotos.length === 0) return null;
-              return (
-                <>
-                  <div className="gold-divider mb-4" />
-                  <div className="flex items-center gap-2 mb-3">
-                    <MessageSquare className="w-4 h-4 text-champagne-500" />
-                    <span className="text-sm font-medium text-ink-charcoal">修图备注汇总</span>
-                  </div>
-                  <div className="space-y-2 max-h-48 overflow-auto pr-2">
-                    {remarkPhotos.map((p) => {
-                      const sel = selections[p.id];
-                      return (
-                        <div key={p.id} className="p-3 rounded-lg bg-cream/50">
-                          <div className="flex items-center gap-2 mb-1">
-                            <Tag className="w-3.5 h-3.5 text-champagne-500" />
-                            <span className="text-xs font-medium text-ink-charcoal">
-                              {p.mark === 'album' ? '入册' : p.mark === 'retouch' ? '精修' : '不选'}
-                            </span>
-                          </div>
-                          <p className="text-sm text-ink-warm pl-5.5">{sel?.remark}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              );
-            })()}
+            <SelectionSlip
+              order={order}
+              photos={order.photos.map((p) => ({
+                ...p,
+                mark: (selections[p.id]?.mark as PhotoMark) || p.mark || null,
+                remark: selections[p.id]?.remark || p.remark || null,
+              }))}
+            />
           </div>
         </div>
       )}

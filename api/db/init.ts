@@ -22,6 +22,8 @@ export function initDatabase() {
         retouch_count INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL DEFAULT 'pending_selection',
         selection_token TEXT NOT NULL UNIQUE,
+        selection_link_created_at TEXT,
+        selection_link_expires_at TEXT,
         shipping_company TEXT,
         shipping_tracking_no TEXT,
         satisfaction INTEGER,
@@ -51,10 +53,32 @@ export function initDatabase() {
         FOREIGN KEY (order_id) REFERENCES orders(id)
     );
 
+    CREATE TABLE IF NOT EXISTS activity_logs (
+        id TEXT PRIMARY KEY,
+        order_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        content TEXT,
+        detail_json TEXT,
+        operator TEXT,
+        timestamp TEXT NOT NULL,
+        FOREIGN KEY (order_id) REFERENCES orders(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS link_send_logs (
+        id TEXT PRIMARY KEY,
+        order_id TEXT NOT NULL,
+        sent_at TEXT NOT NULL,
+        method TEXT NOT NULL,
+        operator TEXT,
+        FOREIGN KEY (order_id) REFERENCES orders(id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
     CREATE INDEX IF NOT EXISTS idx_orders_photographer ON orders(photographer_id);
     CREATE INDEX IF NOT EXISTS idx_photos_order ON photos(order_id);
     CREATE INDEX IF NOT EXISTS idx_status_logs_order ON status_logs(order_id);
+    CREATE INDEX IF NOT EXISTS idx_activity_logs_order ON activity_logs(order_id);
+    CREATE INDEX IF NOT EXISTS idx_link_send_logs_order ON link_send_logs(order_id);
     CREATE INDEX IF NOT EXISTS idx_orders_token ON orders(selection_token);
   `);
 
@@ -90,8 +114,9 @@ function seedMockData() {
     INSERT INTO orders (
       id, order_no, customer_name, customer_phone, photographer_id,
       shoot_date, package_name, album_count, retouch_count, status,
-      selection_token, satisfaction, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      selection_token, selection_link_created_at, selection_link_expires_at,
+      satisfaction, selection_link_sent, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertPhoto = db.prepare(`
@@ -100,7 +125,17 @@ function seedMockData() {
   `);
 
   const insertStatusLog = db.prepare(`
-    INSERT INTO status_logs (id, order_id, status, timestamp, operator)
+    INSERT INTO status_logs (id, order_id, status, timestamp, operator, remark)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  const insertActivity = db.prepare(`
+    INSERT INTO activity_logs (id, order_id, type, content, detail_json, operator, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const insertLinkSendLog = db.prepare(`
+    INSERT INTO link_send_logs (id, order_id, sent_at, method, operator)
     VALUES (?, ?, ?, ?, ?)
   `);
 
@@ -187,9 +222,23 @@ function seedMockData() {
   ];
 
   const allStatuses = ['pending_selection', 'selecting', 'selected', 'retouching', 'layouting', 'producing', 'shipping', 'completed'];
+  const ORDER_STATUS_LABELS: Record<string, string> = {
+    pending_selection: '待选片',
+    selecting: '选片中',
+    selected: '已选片',
+    retouching: '精修中',
+    layouting: '排版中',
+    producing: '相册制作中',
+    shipping: '物流中',
+    completed: '已完成',
+  };
 
   for (const order of mockOrders) {
-    const createdAt = new Date(Date.now() - Math.random() * 10 * 24 * 60 * 60 * 1000).toISOString();
+    const createdAt = new Date(Date.now() - Math.random() * 10 * 24 * 60 * 60 * 1000);
+    const linkCreatedAt = new Date(createdAt.getTime() + 1 * 60 * 60 * 1000);
+    const linkExpiresAt = new Date(linkCreatedAt.getTime() + 15 * 24 * 60 * 60 * 1000);
+    const linkSent = order.status !== 'pending_selection' ? 1 : 0;
+
     insertOrder.run(
       order.id,
       order.orderNo,
@@ -202,8 +251,11 @@ function seedMockData() {
       order.retouchCount,
       order.status,
       order.token,
+      linkCreatedAt.toISOString(),
+      linkExpiresAt.toISOString(),
       order.satisfaction ?? null,
-      createdAt,
+      linkSent,
+      createdAt.toISOString(),
       now()
     );
 
@@ -211,12 +263,63 @@ function seedMockData() {
     for (let i = 0; i <= currentIdx; i++) {
       const st = allStatuses[i];
       if (st === 'selecting' && order.status === 'pending_selection') continue;
+      const ts = new Date(Date.now() - (currentIdx - i) * 2 * 24 * 60 * 60 * 1000 - Math.random() * 3600000).toISOString();
       insertStatusLog.run(
         uuidv4(),
         order.id,
         st,
-        new Date(Date.now() - (currentIdx - i) * 2 * 24 * 60 * 60 * 1000).toISOString(),
-        '系统'
+        ts,
+        '系统',
+        i === 0 ? '订单创建' : null
+      );
+      insertActivity.run(
+        uuidv4(),
+        order.id,
+        'status_change',
+        `状态变更为「${ORDER_STATUS_LABELS[st]}」`,
+        JSON.stringify({ from: i > 0 ? ORDER_STATUS_LABELS[allStatuses[i - 1]] : '无', to: ORDER_STATUS_LABELS[st] }),
+        '系统',
+        ts
+      );
+    }
+
+    if (linkSent) {
+      const sendTs = new Date(linkCreatedAt.getTime() + 2 * 3600000).toISOString();
+      insertLinkSendLog.run(uuidv4(), order.id, sendTs, '微信', '系统');
+      insertActivity.run(
+        uuidv4(),
+        order.id,
+        'link_sent',
+        '选片链接已通过微信发送给客户',
+        JSON.stringify({ method: '微信' }),
+        '系统',
+        sendTs
+      );
+    }
+
+    if (order.status === 'shipping') {
+      const ts = new Date(Date.now() - Math.random() * 24 * 3600000).toISOString();
+      insertActivity.run(
+        uuidv4(),
+        order.id,
+        'shipping_updated',
+        '物流信息已录入：顺丰速运 SF1234567890',
+        JSON.stringify({ company: '顺丰速运', trackingNo: 'SF1234567890' }),
+        '客服小王',
+        ts
+      );
+    }
+
+    if (order.satisfaction) {
+      const ts = new Date(Date.now() - Math.random() * 12 * 3600000).toISOString();
+      insertActivity.run(
+        uuidv4(),
+        order.id,
+        'satisfaction_updated',
+        `客户满意度评分：${order.satisfaction}星`,
+        JSON.stringify({ satisfaction: order.satisfaction }),
+        '系统',
+        ts
       );
     }
 
@@ -245,7 +348,7 @@ function seedMockData() {
         photoUrl,
         mark,
         remark,
-        createdAt
+        createdAt.toISOString()
       );
     }
   }

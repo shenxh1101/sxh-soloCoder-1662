@@ -4,6 +4,7 @@ import type {
   Photographer,
   PhotographerStats,
   PhotoMark,
+  ActivityLog,
 } from '@shared/types';
 
 const API_BASE = '/api';
@@ -102,11 +103,19 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  markSelectionLinkSent: (id: string, sent: boolean) =>
+  markSelectionLinkSent: (id: string, sent: boolean, method?: string) =>
     request<Order>(`/orders/${id}/selection-link-sent`, {
       method: 'PATCH',
-      body: JSON.stringify({ sent }),
+      body: JSON.stringify({ sent, method: method || '微信' }),
     }),
+
+  regenerateSelectionLink: (id: string) =>
+    request<Order>(`/orders/${id}/regenerate-selection-link`, {
+      method: 'POST',
+    }),
+
+  getActivities: (orderId: string) =>
+    request<ActivityLog[]>(`/orders/${orderId}/activities`),
 
   queryOrders: (keyword: string) => request<Order[]>(`/query?keyword=${encodeURIComponent(keyword)}`),
 

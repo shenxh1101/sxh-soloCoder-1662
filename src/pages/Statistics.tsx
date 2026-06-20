@@ -36,11 +36,12 @@ export default function Statistics() {
       orders: acc.orders + s.orderCount,
       photos: acc.photos + s.totalPhotos,
       retouch: acc.retouch + s.retouchPhotos,
-      satSum: acc.satSum + s.avgSatisfaction * s.orderCount,
+      satSum: acc.satSum + s.avgSatisfaction * s.ratedOrderCount,
+      ratedOrders: acc.ratedOrders + s.ratedOrderCount,
     }),
-    { orders: 0, photos: 0, retouch: 0, satSum: 0 }
+    { orders: 0, photos: 0, retouch: 0, satSum: 0, ratedOrders: 0 }
   );
-  const avgSat = totals.orders > 0 ? (totals.satSum / totals.orders).toFixed(1) : '0.0';
+  const avgSat = totals.ratedOrders > 0 ? (totals.satSum / totals.ratedOrders).toFixed(1) : '0.0';
 
   return (
     <Layout>
